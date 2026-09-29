@@ -81,21 +81,26 @@ function Get-HarnessTaskFile {
 # Find the worktree for a task name alone, by scanning git's own worktree
 # list. Used by sync/done/clean, which take only a task name because requiring
 # the wave too would mean remembering it.
+#
+# The branch is "wave/<wave>-<task>" and the worktree directory is the same
+# slug, so the match is on the segment after the final dash: the task name
+# alone is what the caller has. Matching "wave-<task>" instead would miss
+# every real case, because the slug always begins with the wave number.
 function Get-HarnessWorktreeForTask {
     param([string] $Task)
 
-    $wanted = "wave-$Task"
     $path = $null
 
     foreach ($line in (& git worktree list --porcelain)) {
         if ($line -match '^worktree (.+)$') {
             $path = $Matches[1]
         }
-        elseif ($line -match '^branch refs/heads/(.+)$') {
-            $branch = $Matches[1]
-            $slug = $branch -replace '^wave/', ''
-            # Match on the slug exactly: "canvas" must not match "canvas-layers".
-            if ($slug -eq $wanted) {
+        elseif ($line -match '^branch refs/heads/wave/(.+)$') {
+            $slug = $Matches[1]
+            # Compare the trailing "-<task>" segment exactly, so task "canvas"
+            # does not match "canvas-layers" and "core" does not match
+            # "core-ui".
+            if ($slug.EndsWith("-$Task", [System.StringComparison]::Ordinal)) {
                 return ($path -replace '/', '\')
             }
         }

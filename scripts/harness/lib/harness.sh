@@ -72,9 +72,13 @@ harness_task_file() {
 # Find the worktree for a task name alone, by scanning git's own worktree
 # list. Used by wave-sync/done/clean, which take only a task name because
 # requiring the wave too would mean remembering it.
+#
+# The branch is "wave/<wave>-<task>" and the worktree directory is the same
+# slug, so the match is on the segment after the final dash: the task name
+# alone is what the caller has. Matching "wave-<task>" instead would miss
+# every real case, because the slug always begins with the wave number.
 harness_worktree_for_task() {
   local task="$1"
-  local wanted="wave-${task}"
   local path=""
 
   while IFS= read -r line; do
@@ -83,11 +87,14 @@ harness_worktree_for_task() {
       branch\ *)
         local branch="${line#branch refs/heads/}"
         local slug="${branch#wave/}"
-        # Match on the slug exactly: "canvas" must not match "canvas-layers".
-        if [ "$slug" = "$wanted" ]; then
-          echo "$path"
-          return 0
-        fi
+        # Compare the trailing "-<task>" segment exactly, so task "canvas"
+        # does not match "canvas-layers" and "core" does not match "core-ui".
+        case "$slug" in
+          *-"$task")
+            echo "$path"
+            return 0
+            ;;
+        esac
         ;;
     esac
   done < <(git worktree list --porcelain)
