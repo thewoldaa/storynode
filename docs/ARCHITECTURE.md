@@ -257,6 +257,10 @@ still lays out and still shows a toolbar, so the count alone cannot tell a
 working toolbar from a broken one — and a control that is enabled on a
 document with no history is a page that is not reading what the host sent.
 
+It counts the areas that registered with the shell, which is the only way to
+tell an area whose script threw from a document with nothing in it: the
+markup is all in the shell, so an empty graph looks the same either way.
+
 ## Build
 
 CMake with source globbing and `CONFIGURE_DEPENDS`. Globbing rather than an

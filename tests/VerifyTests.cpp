@@ -30,7 +30,7 @@ const char* kGoodReport = R"({
                "width": 1010, "height": 25, "display": "flex", "visible": true },
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
-  "undoDisabled": true, "redoDisabled": true,
+  "undoDisabled": true, "redoDisabled": true, "areas": 2,
   "nodes": 0, "ports": 0, "buttons": 7
 })";
 
@@ -60,7 +60,7 @@ TEST(RejectsAMissingFooter)
       "graph":   { "top": 37, "bottom": 583, "width": 1010, "height": 546, "visible": true },
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
-  "undoDisabled": true, "redoDisabled": true,
+  "undoDisabled": true, "redoDisabled": true, "areas": 2,
   "nodes": 0, "ports": 0, "buttons": 7
     })");
 
@@ -81,7 +81,7 @@ TEST(RejectsAZeroHeightFooter)
                    "display": "flex", "visible": false },
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
-  "undoDisabled": true, "redoDisabled": true,
+  "undoDisabled": true, "redoDisabled": true, "areas": 2,
   "nodes": 0, "ports": 0, "buttons": 7
     })");
 
@@ -101,7 +101,7 @@ TEST(RejectsAFooterThatOverlapsTheGraph)
       "footer":  { "top": 400, "bottom": 425, "width": 1010, "height": 25, "visible": true },
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
-  "undoDisabled": true, "redoDisabled": true,
+  "undoDisabled": true, "redoDisabled": true, "areas": 2,
   "nodes": 0, "ports": 0, "buttons": 7
     })");
 
@@ -119,7 +119,7 @@ TEST(RejectsAGraphThatOverlapsTheToolbar)
       "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
-  "undoDisabled": true, "redoDisabled": true,
+  "undoDisabled": true, "redoDisabled": true, "areas": 2,
   "nodes": 0, "ports": 0, "buttons": 7
     })");
 
@@ -136,7 +136,7 @@ TEST(RejectsAMissingToolbar)
       "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
-  "undoDisabled": true, "redoDisabled": true,
+  "undoDisabled": true, "redoDisabled": true, "areas": 2,
   "nodes": 0, "ports": 0, "buttons": 7
     })");
 
@@ -156,7 +156,7 @@ TEST(RejectsAToolbarWithNoButtons)
       "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
-  "undoDisabled": true, "redoDisabled": true,
+  "undoDisabled": true, "redoDisabled": true, "areas": 2,
   "nodes": 0, "ports": 0, "buttons": 0
     })");
 
@@ -192,7 +192,7 @@ TEST(AcceptsATightButValidLayout)
       "footer":  { "top": 474, "bottom": 499, "width": 900, "height": 25, "visible": true },
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
-  "undoDisabled": true, "redoDisabled": true,
+  "undoDisabled": true, "redoDisabled": true, "areas": 2,
   "nodes": 0, "ports": 0, "buttons": 7
     })");
 
@@ -214,7 +214,7 @@ TEST(RejectsAMissingUndoControl)
       "graph":   { "top": 37, "bottom": 558, "width": 1010, "height": 521, "visible": true },
       "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
       "redo": { "width": 60, "height": 24, "visible": true },
-      "undoDisabled": true, "redoDisabled": true,
+      "undoDisabled": true, "redoDisabled": true, "areas": 2,
       "nodes": 0, "ports": 0, "buttons": 7
     })");
 
@@ -236,10 +236,52 @@ TEST(RejectsAnUndoControlThatDidNotReadTheHostState)
       "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
       "undo": { "width": 60, "height": 24, "visible": true },
       "redo": { "width": 60, "height": 24, "visible": true },
-      "undoDisabled": false, "redoDisabled": true,
+      "undoDisabled": false, "redoDisabled": true, "areas": 2,
       "nodes": 0, "ports": 0, "buttons": 7
     })");
 
     CHECK_FALSE(Passed(report));
     CHECK(report.find("undo is enabled") != std::string::npos);
+}
+
+TEST(RejectsAnAreaThatDidNotRegister)
+{
+    // An area whose script threw during parsing registers nothing, and the
+    // page still lays out: the markup is all in the shell. A graph area with
+    // nothing behind it looks exactly like a document with no nodes in it, so
+    // the count is the only thing that tells them apart.
+    const std::string report = FormatLayoutReport(R"({
+      "type": "layoutReport",
+      "viewport": { "width": 1010, "height": 583 },
+      "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
+      "graph":   { "top": 37, "bottom": 558, "width": 1010, "height": 521, "visible": true },
+      "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
+      "undo": { "width": 60, "height": 24, "visible": true },
+      "redo": { "width": 60, "height": 24, "visible": true },
+      "undoDisabled": true, "redoDisabled": true, "areas": 1,
+      "nodes": 0, "ports": 0, "buttons": 7
+    })");
+
+    CHECK_FALSE(Passed(report));
+    CHECK(report.find("interface area") != std::string::npos);
+}
+
+TEST(RejectsAReportThatCouldNotCountTheAreas)
+{
+    // The shell itself is missing, which means the page threw before it
+    // exposed anything. The probe reports -1 rather than a count, and that
+    // must fail rather than be read as "fewer than two, but close enough".
+    const std::string report = FormatLayoutReport(R"({
+      "type": "layoutReport",
+      "viewport": { "width": 1010, "height": 583 },
+      "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
+      "graph":   { "top": 37, "bottom": 558, "width": 1010, "height": 521, "visible": true },
+      "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
+      "undo": { "width": 60, "height": 24, "visible": true },
+      "redo": { "width": 60, "height": 24, "visible": true },
+      "undoDisabled": true, "redoDisabled": true, "areas": -1,
+      "nodes": 0, "ports": 0, "buttons": 7
+    })");
+
+    CHECK_FALSE(Passed(report));
 }

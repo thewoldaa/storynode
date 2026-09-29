@@ -319,6 +319,17 @@
       }
     },
 
+    /// How many areas have registered.
+    ///
+    /// Exposed because the alternative is not knowing. An area whose script
+    /// throws during parsing registers nothing and the page still lays out:
+    /// the markup is all in the shell, so a toolbar with no canvas behind it
+    /// looks exactly like a working one from the outside. The verification
+    /// pass reads this.
+    areaCount: function () {
+      return areas.length;
+    },
+
     post: post,
     select: select,
     findNode: findNode,

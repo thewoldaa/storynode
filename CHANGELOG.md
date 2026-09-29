@@ -31,7 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Redo, enabled from the same source. The binding lives in the shell because
   undo is not a canvas or an inspector concern.
 - 28 unit tests for the stack and the session, 11 for the new bridge messages,
-  and 2 for the new layout checks.
+  and 4 for the new layout checks.
+- The layout check now counts the interface areas that registered with the
+  shell, which is the only way to tell an area whose script threw from a
+  document with nothing in it — the markup is all in the shell, so an empty
+  graph looks the same either way.
 
 ### Fixed
 

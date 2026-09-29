@@ -37,6 +37,8 @@ const wchar_t* LayoutProbeScript()
     };
   }
 
+  var shell = window.storynode && window.storynode.shell;
+
   var result = {
     type: "layoutReport",
     viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -50,6 +52,11 @@ const wchar_t* LayoutProbeScript()
                   document.getElementById("undo").disabled,
     redoDisabled: !!document.getElementById("redo") &&
                   document.getElementById("redo").disabled,
+    // How many interface areas registered with the shell. An area whose script
+    // threw during parsing registers nothing and the page still lays out,
+    // because the markup is all in the shell — so a toolbar with no canvas
+    // behind it looks exactly like a working one from the outside.
+    areas: shell && shell.areaCount ? shell.areaCount() : -1,
     nodes: document.querySelectorAll(".node").length,
     ports: document.querySelectorAll(".port").length,
     buttons: document.querySelectorAll("button").length
@@ -182,6 +189,23 @@ std::string FormatLayoutReport(const std::string& pageReport)
     if (!report["redoDisabled"].AsBool())
     {
         out << "  ERROR: redo is enabled on a document with no history\n";
+        ok = false;
+    }
+
+    // The areas that registered with the shell: the canvas and the inspector.
+    //
+    // A count rather than a name, because the shell does not know an area by
+    // name and should not start. This is what catches an area whose script
+    // threw: the page still lays out, the toolbar still renders, and the graph
+    // area is simply empty, which from the outside looks like a document with
+    // no nodes in it.
+    const std::int64_t areas = report["areas"].AsInt(-1);
+    out << "  areas           " << areas << "\n";
+    if (areas < 2)
+    {
+        out << "  ERROR: only " << areas
+            << " interface area(s) registered; the canvas and the inspector "
+               "must both load\n";
         ok = false;
     }
 
