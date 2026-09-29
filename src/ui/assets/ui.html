@@ -336,6 +336,14 @@
   // areas edit nodes and properties, and neither of them owns the document.
   // The shell does, so the binding lives here and the areas stay independent
   // of it — and of each other.
+  //
+  // The host advertises the same shortcuts in its menu, and a Win32
+  // accelerator consumes the key before the page is offered it, so in the
+  // shipped application this handler usually does not run. It is what makes
+  // the binding work when the page is the one that sees the key — a future
+  // host that has no accelerator table, or the page opened in a browser for
+  // development. Both paths end at the same message, and only one of them
+  // ever fires for a given press.
   window.addEventListener("keydown", function (event) {
     if (!event.ctrlKey && !event.metaKey) { return; }
 

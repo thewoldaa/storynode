@@ -609,6 +609,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         case ID_VIEW_VALIDATE:
             if (g_bridge)
             {
+                // Validation only. The document and the history have not
+                // changed, and re-sending them would throw away the page's
+                // scroll position for a command that is about problems.
                 g_bridge->SendValidation();
             }
             return 0;
