@@ -219,3 +219,21 @@ aside h2.section {
   min-height: 0;
 }
 
+/* The selected nodes disagree about this property. The label says so rather
+   than the control showing one node's value as if it were all of theirs. */
+.mixed {
+  float: right;
+  color: var(--warn);
+  font-size: 9px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.field.kind-checkbox .mixed { float: none; margin-left: auto; }
+
+.problem .subject {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+}

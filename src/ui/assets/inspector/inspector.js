@@ -143,11 +143,44 @@
 
   // --- the selection -------------------------------------------------------
 
-  /// The id of what is selected, or an empty string. Used to decide whether a
-  /// re-render is of the same selection, which is what lets focus be restored
-  /// after an edit without stealing it when the user selects something else.
-  function selectionSignature(node) {
-    return node ? node.id : "";
+  /// The selected nodes, in the order the document lists them.
+  ///
+  /// Reads `selectedIds` when the shell has it and falls back to the single
+  /// `selectedId`. Multi-select is the canvas task's, and it widens the shell
+  /// from one id to a set; this panel is written against the set from the
+  /// start so that the two do not have to be changed together.
+  function selectedNodes(state) {
+    var ids = [];
+    if (state.selectedIds && state.selectedIds.length) {
+      ids = state.selectedIds;
+    } else if (state.selectedId) {
+      ids = [state.selectedId];
+    }
+
+    var nodes = [];
+    for (var i = 0; i < ids.length; i++) {
+      var node = shell.findNode(ids[i]);
+      if (node) { nodes.push(node); }
+    }
+    return nodes;
+  }
+
+  /// A value that changes exactly when the selection does, so that focus is
+  /// restored after a re-render of the same selection and not after a change
+  /// of selection. Restoring focus into a field of a node the user just
+  /// clicked would take the keyboard away from the canvas.
+  function selectionSignature(nodes) {
+    var parts = [];
+    for (var i = 0; i < nodes.length; i++) { parts.push(nodes[i].id); }
+    return parts.join("\u001f");
+  }
+
+  function isSelected(subjectId, nodes) {
+    if (!subjectId) { return false; }
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === subjectId) { return true; }
+    }
+    return false;
   }
 
   // --- values --------------------------------------------------------------
@@ -197,26 +230,38 @@
 
   // --- building a cell -----------------------------------------------------
   //
-  // A cell is one property row: the declaration, the node it belongs to, the
-  // value shown, and the problem reported for it. It is built once per render
+  // A cell is one property row: the declaration, the nodes it applies to, the
+  // value shown, and whether that value is shared. It is built once per render
   // and kept, so the commit handler never has to work out which node a
   // keystroke was meant for.
 
-  function buildCell(field, node, problems) {
+  function buildCell(field, nodes, problems) {
     var cell = {
       field: field,
-      node: node,
+      nodes: nodes,
+      mixed: false,
       readonly: false,
       value: null,
       text: "",
-      problem: problemForField(field.key, node, problems),
+      problem: problemForField(field.key, nodes, problems),
       element: null,
       note: null
     };
 
-    cell.value = hasValue(node, field.key) ? node.data[field.key] : defaultFor(field);
-    cell.readonly = !editableValue(cell.value);
+    cell.value = hasValue(nodes[0], field.key) ? nodes[0].data[field.key] : defaultFor(field);
 
+    for (var i = 1; i < nodes.length; i++) {
+      var other = hasValue(nodes[i], field.key) ? nodes[i].data[field.key] : defaultFor(field);
+      if (!sameValue(cell.value, other)) {
+        // The selection disagrees about this property. The control shows that
+        // rather than one node's value: showing one of several values makes an
+        // edit that writes it to all of them look like no change at all.
+        cell.mixed = true;
+        break;
+      }
+    }
+
+    cell.readonly = !editableValue(cell.value);
     if (kindOf(field).control === "checkbox" && typeof cell.value !== "boolean") {
       // A checkbox field holding something that is not a boolean would show an
       // unchecked box for a value that is set, and a commit would then write
@@ -224,13 +269,27 @@
       cell.readonly = true;
     }
 
-    cell.text = displayValue(cell.value);
+    cell.text = cell.mixed ? "" : displayValue(cell.value);
     return cell;
   }
 
-  /// The properties the node's type declares, in the order it declares them.
-  function declaredFields(node) {
-    return declarationFor(node.type).properties;
+  /// The properties every selected node declares, in the order the first
+  /// node's type declares them.
+  function sharedFields(nodes) {
+    var declared = declarationFor(nodes[0].type).properties;
+    var fields = [];
+
+    for (var i = 0; i < declared.length; i++) {
+      var shared = true;
+      for (var n = 1; n < nodes.length; n++) {
+        if (indexOfField(declarationFor(nodes[n].type).properties, declared[i].key) === -1) {
+          shared = false;
+          break;
+        }
+      }
+      if (shared) { fields.push(declared[i]); }
+    }
+    return fields;
   }
 
   function indexOfField(fields, key) {
@@ -247,14 +306,21 @@
   /// And a node type with no declaration at all would otherwise render as an
   /// empty panel, which reads as "this node has nothing" rather than as "this
   /// build does not know this type".
-  function undeclaredKeys(node, declared) {
-    var keys = dataKeys(node);
-    var out = [];
+  function undeclaredKeys(nodes, declared) {
+    var first = dataKeys(nodes[0]);
+    var keys = [];
 
-    for (var i = 0; i < keys.length; i++) {
-      if (indexOfField(declared, keys[i]) === -1) { out.push(keys[i]); }
+    for (var i = 0; i < first.length; i++) {
+      var key = first[i];
+      if (indexOfField(declared, key) !== -1) { continue; }
+
+      var shared = true;
+      for (var n = 1; n < nodes.length; n++) {
+        if (dataKeys(nodes[n]).indexOf(key) === -1) { shared = false; break; }
+      }
+      if (shared) { keys.push(key); }
     }
-    return out;
+    return keys;
   }
 
   /// A declaration for a property nothing declares.
@@ -291,7 +357,7 @@
   /// still worth having, because the alternative is a message list with no
   /// indication of which of a dozen fields it is about. It goes away when the
   /// validator can name the property it rejected.
-  function problemForField(key, node, problems) {
+  function problemForField(key, nodes, problems) {
     // The key is escaped before it becomes a pattern. A declared key is a bare
     // identifier, but an undeclared one comes from the document, and a file
     // people edit by hand can hold a key with a bracket in it — which would
@@ -300,7 +366,7 @@
     for (var i = 0; i < problems.length; i++) {
       var problem = problems[i];
       if (!problem || !problem.message) { continue; }
-      if (problem.subjectId !== node.id) { continue; }
+      if (!isSelected(problem.subjectId, nodes)) { continue; }
       if (needle.test(problem.message)) { return problem; }
     }
     return null;
@@ -310,10 +376,10 @@
     return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  function problemsForNode(node, problems) {
+  function problemsForNodes(nodes, problems) {
     var relevant = [];
     for (var i = 0; i < problems.length; i++) {
-      if (problems[i] && problems[i].subjectId === node.id) {
+      if (problems[i] && isSelected(problems[i].subjectId, nodes)) {
         relevant.push(problems[i]);
       }
     }
@@ -330,12 +396,12 @@
   /// user has to go looking for the node in the graph, and because a problem
   /// the validator reported for the node as a whole has no property to sit
   /// next to.
-  function stateChip(node, problems) {
+  function stateChip(nodes, problems) {
     var errors = 0;
     var warnings = 0;
 
     for (var i = 0; i < problems.length; i++) {
-      if (!problems[i] || problems[i].subjectId !== node.id) { continue; }
+      if (!problems[i] || !isSelected(problems[i].subjectId, nodes)) { continue; }
       if (problems[i].severity === "warning") { warnings++; } else { errors++; }
     }
 
@@ -357,9 +423,9 @@
 
   function render(state) {
     var problems = state.problems || [];
-    var node = state.selectedId ? shell.findNode(state.selectedId) : null;
+    var nodes = selectedNodes(state);
 
-    if (!node) {
+    if (nodes.length === 0) {
       panel.classList.remove("open");
       body.innerHTML = '<p class="hint">Select a node to edit it.</p>';
       cells = [];
@@ -374,22 +440,22 @@
     // lost after every edit and the next keystroke reaches the page, where
     // Delete removes the selected node.
     var focus = captureFocus();
-    var signature = selectionSignature(node);
+    var signature = selectionSignature(nodes);
 
     cells = [];
-    var declared = declaredFields(node);
+    var declared = sharedFields(nodes);
     for (var i = 0; i < declared.length; i++) {
-      cells.push(buildCell(declared[i], node, problems));
+      cells.push(buildCell(declared[i], nodes, problems));
     }
 
-    var undeclared = undeclaredKeys(node, declared);
+    var undeclared = undeclaredKeys(nodes, declared);
     for (var j = 0; j < undeclared.length; j++) {
       var key = undeclared[j];
-      var value = hasValue(node, key) ? node.data[key] : null;
-      cells.push(buildCell(describeUndeclared(key, value), node, problems));
+      var value = hasValue(nodes[0], key) ? nodes[0].data[key] : null;
+      cells.push(buildCell(describeUndeclared(key, value), nodes, problems));
     }
 
-    var html = headerHtml(node, problems);
+    var html = headerHtml(nodes, problems);
 
     if (declared.length > 0) {
       html += '<h2 class="section">Properties</h2>' + fieldsHtml(cells, true);
@@ -402,25 +468,41 @@
            +  '<p class="hint">This node type declares no properties.</p>';
     }
 
-    html += problemsHtml(node, problems);
+    html += problemsHtml(nodes, problems);
 
     body.innerHTML = html;
     bindCells();
     restoreFocus(focus, signature);
   }
 
-  function headerHtml(node, problems) {
-    var type = node.type || "(no type)";
-    var name = declarationFor(type).name;
-    var chip = stateChip(node, problems);
+  function headerHtml(nodes, problems) {
+    var types = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var type = nodes[i].type || "(no type)";
+      if (types.indexOf(type) === -1) { types.push(type); }
+    }
+
+    var names = [];
+    for (var j = 0; j < types.length; j++) {
+      var name = declarationFor(types[j]).name;
+      if (name) { names.push(name); }
+    }
+
+    var ids = [];
+    for (var k = 0; k < nodes.length; k++) { ids.push(nodes[k].id); }
+    var idText = nodes.length === 1 ? ids[0] : nodes.length + " nodes selected";
+
+    var chip = stateChip(nodes, problems);
 
     return '<div class="node-head">'
          +   '<div class="head-row">'
-         +     '<span class="node-type">' + shell.escapeHtml(type) + '</span>'
-         +     (name ? '<span class="node-name">' + shell.escapeHtml(name) + '</span>' : '')
+         +     '<span class="node-type">' + shell.escapeHtml(types.join(", ")) + '</span>'
+         +     (names.length ? '<span class="node-name">' + shell.escapeHtml(names.join(", ")) + '</span>' : '')
          +   '</div>'
          +   '<div class="head-row">'
-         +     '<span class="node-id">' + shell.escapeHtml(node.id) + '</span>'
+         +     '<span class="node-id" title="' + shell.escapeHtml(ids.join(", ")) + '">'
+         +       shell.escapeHtml(idText)
+         +     '</span>'
          +     '<span class="node-state ' + chip.cls + '">' + shell.escapeHtml(chip.text) + '</span>'
          +   '</div>'
          + '</div>';
@@ -462,10 +544,12 @@
       html += '<label class="check">'
            +    controlHtml(cell, kind)
            +    '<span>' + shell.escapeHtml(field.label) + '</span>'
+           +    (cell.mixed ? '<span class="mixed">multiple values</span>' : '')
            +  '</label>';
     } else {
       html += '<label for="field-' + key + '">'
            +    shell.escapeHtml(field.label)
+           +    (cell.mixed ? '<span class="mixed">multiple values</span>' : '')
            +  '</label>'
            +  controlHtml(cell, kind);
     }
@@ -488,11 +572,13 @@
 
     switch (kind.control) {
       case "textarea":
-        return '<textarea' + attrs + ' rows="4">'
-             +  shell.escapeHtml(cell.text) + '</textarea>';
+        return '<textarea' + attrs + ' rows="4"'
+             +  (cell.mixed ? ' placeholder="multiple values"' : '')
+             +  '>' + shell.escapeHtml(cell.text) + '</textarea>';
 
       case "number":
-        return '<input' + attrs + ' type="number" value="' + shell.escapeHtml(cell.text) + '">';
+        return '<input' + attrs + ' type="number" value="' + shell.escapeHtml(cell.text) + '"'
+             +  (cell.mixed ? ' placeholder="multiple values"' : '') + '>';
 
       case "checkbox":
         return '<input' + attrs + ' type="checkbox"'
@@ -507,14 +593,16 @@
         // that the field says what it is for, rather than pretending a text
         // box is the whole of an asset reference.
         return '<div class="asset">'
-             +    '<input' + attrs + ' type="text" value="' + shell.escapeHtml(cell.text) + '">'
+             +    '<input' + attrs + ' type="text" value="' + shell.escapeHtml(cell.text) + '"'
+             +      (cell.mixed ? ' placeholder="multiple values"' : '') + '>'
              +    '<button type="button" class="browse" disabled'
              +      ' title="Not implemented yet: the file picker arrives with the asset panel.">'
              +      'Browse</button>'
              +  '</div>';
 
       default:
-        return '<input' + attrs + ' type="text" value="' + shell.escapeHtml(cell.text) + '">';
+        return '<input' + attrs + ' type="text" value="' + shell.escapeHtml(cell.text) + '"'
+             +  (cell.mixed ? ' placeholder="multiple values"' : '') + '>';
     }
   }
 
@@ -526,13 +614,15 @@
     var known = false;
 
     for (var i = 0; i < options.length; i++) {
-      var selected = options[i] === cell.value ? ' selected' : '';
+      var selected = (!cell.mixed && options[i] === cell.value) ? ' selected' : '';
       if (options[i] === cell.value) { known = true; }
       html += '<option value="' + shell.escapeHtml(options[i]) + '"' + selected + '>'
            +  shell.escapeHtml(options[i]) + '</option>';
     }
 
-    if (!known) {
+    if (cell.mixed) {
+      html += '<option value="" selected>multiple values</option>';
+    } else if (!known) {
       // The value is not one the declaration lists — an empty one, or one
       // written by a newer build. Shown as its own option rather than dropped:
       // a select with no matching option displays the first one, and the next
@@ -554,18 +644,22 @@
          +  shell.escapeHtml(cell.problem.message) + '</div>';
   }
 
-  function problemsHtml(node, problems) {
-    var relevant = problemsForNode(node, problems);
+  function problemsHtml(nodes, problems) {
+    var relevant = problemsForNodes(nodes, problems);
     var html = '<h2 class="section">Problems</h2>';
 
     if (relevant.length === 0) {
-      return html + '<p class="hint">Nothing reported for this node.</p>';
+      return html + '<p class="hint">Nothing reported for '
+           + (nodes.length === 1 ? "this node" : "these nodes") + '.</p>';
     }
 
     for (var i = 0; i < relevant.length; i++) {
       var problem = relevant[i];
+      var subject = nodes.length > 1 && problem.subjectId
+                  ? '<span class="subject">' + shell.escapeHtml(problem.subjectId) + '</span>'
+                  : '';
       html += '<div class="problem ' + severityClass(problem) + '">'
-           +  shell.escapeHtml(problem.message) + '</div>';
+           +  subject + shell.escapeHtml(problem.message) + '</div>';
     }
     return html;
   }
@@ -586,6 +680,12 @@
       cell.element = field ? field.querySelector("[data-key]") : null;
       cell.note = field ? field.querySelector(".message") : null;
 
+      // A mixed checkbox shows the third state, which no attribute can
+      // express. Clicking it clears it and commits true, which is what the
+      // user meant by clicking a box that was neither on nor off.
+      if (cell.element && cell.element.type === "checkbox" && cell.mixed) {
+        cell.element.indeterminate = true;
+      }
     }
   }
 
@@ -610,8 +710,7 @@
   }
 
   function restoreFocus(focus, signature) {
-    var node = shell.state.selectedId ? shell.findNode(shell.state.selectedId) : null;
-    if (!focus || signature !== selectionSignature(node)) { return; }
+    if (!focus || signature !== selectionSignature(selectedNodes(shell.state))) { return; }
 
     var element = body.querySelector('[data-key="' + focus.key + '"]');
     if (!element) { return; }
@@ -683,16 +782,17 @@
     }
     clearField(cell);
 
-    var node = cell.node;
-    var current = hasValue(node, cell.field.key) ? node.data[cell.field.key] : null;
-    if (sameValue(current, read.value)) { return; }
-
-    shell.post({
-      type: "setProperty",
-      id: node.id,
-      key: cell.field.key,
-      value: read.value
-    });
+    for (var i = 0; i < cell.nodes.length; i++) {
+      var node = cell.nodes[i];
+      var current = hasValue(node, cell.field.key) ? node.data[cell.field.key] : null;
+      if (sameValue(current, read.value)) { continue; }
+      shell.post({
+        type: "setProperty",
+        id: node.id,
+        key: cell.field.key,
+        value: read.value
+      });
+    }
   }
 
   function markField(cell, message) {
