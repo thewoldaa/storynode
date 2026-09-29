@@ -1,0 +1,182 @@
+/* ---------------------------------------------------------------------------
+   The theme, and the chrome the shell owns.
+
+   Everything here is shared by the whole interface: the colour tokens, the
+   typography, the toolbar, the status bar, and the error surface. An area's
+   own stylesheet lives in that area's directory and styles only that area.
+
+   Dark by default with a light variant, because a node graph is read for long
+   stretches and a bright field behind thin lines is tiring.
+
+   Fonts are Windows built-ins only. This page loads from memory with no
+   network access, so a webfont would simply fail to arrive.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --bg:          #16181c;
+  --panel:       #1c1f24;
+  --raised:      #23272e;
+  --rule:        #2c313a;
+  --text:        #d8dbe0;
+  --dim:         #8b929e;
+  --faint:       #5b626d;
+  --accent:      #ffa23a;
+  --accent-dim:  #7a4f16;
+  --ok:          #3ddc84;
+  --warn:        #ffc861;
+  --error:       #ff6b5e;
+
+  --sans: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+
+  --row: 26px;
+  --pad: 12px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:         #eceef1;
+    --panel:      #f7f8fa;
+    --raised:     #ffffff;
+    --rule:       #d2d6dd;
+    --text:       #21252b;
+    --dim:        #5f6672;
+    --faint:      #9aa1ad;
+    --accent:     #c46a00;
+    --accent-dim: #f0d3ab;
+    --ok:         #1a9e56;
+    --warn:       #9a6a00;
+    --error:      #cc3b2e;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Three bands: toolbar, graph, status bar.
+
+   The middle row is 1fr rather than auto, and that is load-bearing. With auto
+   the row takes the height of its content, the graph grows without limit, and
+   the status bar is pushed off the bottom of the window. The layout
+   verification test fails on exactly that, at every window size. */
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 12px/1.4 var(--sans);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  user-select: none;
+}
+
+/* --- toolbar -------------------------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--pad);
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+}
+
+.toolbar .title {
+  margin-left: auto;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--faint); }
+button:active { background: var(--rule); }
+button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* --- the graph container --------------------------------------------------
+
+   The container is here because the shell owns it. What goes inside is the
+   canvas area's business. */
+
+.graph {
+  position: relative;
+  overflow: hidden;
+}
+
+/* --- status bar ----------------------------------------------------------- */
+
+footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px var(--pad);
+  background: var(--panel);
+  border-top: 1px solid var(--rule);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+footer .spacer { margin-left: auto; }
+
+.badge {
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 10px;
+}
+
+.badge.ok    { background: var(--accent-dim); color: var(--text); }
+.badge.warn  { background: var(--warn); color: #000; }
+.badge.error { background: var(--error); color: #000; }
+
+/* --- shared: a validation problem -----------------------------------------
+
+   Used by the inspector and by anything else that lists problems, so a
+   warning looks the same wherever it appears. */
+
+.problem {
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border-left: 3px solid var(--rule);
+  background: var(--bg);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--dim);
+  user-select: text;
+}
+
+.problem.warning { border-left-color: var(--warn); }
+.problem.error   { border-left-color: var(--error); color: var(--text); }
+
+.hint { color: var(--faint); font-style: italic; }
+
+/* --- error surface -------------------------------------------------------- */
+
+#error {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  max-width: 70%;
+  padding: 8px 14px;
+  background: var(--error);
+  color: #000;
+  border-radius: 5px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  display: none;
+  z-index: 10;
+}
+
+#error.show { display: block; }
