@@ -20,11 +20,20 @@
 }
 
 .graph.panning { cursor: grabbing; }
+.graph.dragging { cursor: move; }
+.graph.connecting { cursor: crosshair; }
 
 #viewport {
   position: absolute;
   inset: 0;
   transform-origin: 0 0;
+
+  /* Transparent to the pointer, with the nodes opting back in. The viewport
+     covers the whole graph and is painted above the edge layer, so without
+     this it would swallow every click meant for an edge. Leaving it
+     transparent is also what makes a click on empty space land on the graph
+     itself, which is where the rubber band starts. */
+  pointer-events: none;
 }
 
 /* --- nodes ---------------------------------------------------------------- */
@@ -37,6 +46,7 @@
   border-radius: 6px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
   overflow: hidden;
+  pointer-events: auto;
 }
 
 .node.selected {
@@ -76,13 +86,18 @@
   font-size: 11px;
 }
 
-.node .body .empty { color: var(--faint); font-style: italic; }
+.node .body.empty { color: var(--faint); font-style: italic; }
 
 /* --- ports ----------------------------------------------------------------
 
    Positioned on the node's edges and used as connection targets. The vertical
    position is set inline by canvas.js, which is the side that knows how many
-   ports there are. */
+   ports there are; the horizontal side is set here, because a port that moves
+   from left to right is a class change and not a position.
+
+   An input normally sits on the left. When every edge arriving at it comes
+   from the right, canvas.js adds `.right` and it moves to the right edge —
+   otherwise a backward edge would cross its own target node to reach it. */
 
 .port {
   position: absolute;
@@ -92,11 +107,29 @@
   background: var(--raised);
   border: 1px solid var(--faint);
   transform: translateY(-50%);
+  cursor: crosshair;
 }
 
-.port.in  { left: -5px; }
-.port.out { right: -5px; border-color: var(--accent-dim); }
+.port.in       { left: -5px; }
+.port.in.right { left: auto; right: -5px; }
+.port.out      { right: -5px; border-color: var(--accent-dim); }
+
 .port:hover { border-color: var(--accent); background: var(--accent-dim); }
+
+/* The target of a connection drag. Shown while the button is still down, so
+   the answer arrives before the user commits to it. */
+.port.valid {
+  border-color: var(--ok);
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(61, 220, 132, 0.25);
+}
+
+.port.invalid {
+  border-color: var(--error);
+  background: var(--error);
+  box-shadow: 0 0 0 3px rgba(255, 107, 94, 0.25);
+  cursor: not-allowed;
+}
 
 /* --- edges ---------------------------------------------------------------- */
 
@@ -104,6 +137,10 @@
   position: absolute;
   inset: 0;
   overflow: visible;
+  /* The layer spans the graph, so leaving it transparent to the pointer would
+     put a full-size element over every node. Only the paths take clicks, and
+     a path needs a stroke to be hit at all — hence pointer-events on the
+     paths rather than on the layer. */
   pointer-events: none;
   transform-origin: 0 0;
 }
@@ -112,6 +149,46 @@
   fill: none;
   stroke: var(--faint);
   stroke-width: 1.5;
+  /* Invisible, but clickable. A 1.5px line is a hard target, and clicking an
+     edge is how it is removed. */
+  pointer-events: stroke;
+  stroke-linecap: round;
 }
 
 #edges path:hover { stroke: var(--accent); }
+
+/* A backward edge is one whose target is not to the right of its source. The
+   curve is routed around rather than between, so it is drawn with a dashed
+   stroke: the shape alone does not say why it takes the long way. */
+#edges path.backward {
+  stroke-dasharray: 5 4;
+  stroke: var(--faint);
+}
+
+#edges path.backward:hover { stroke: var(--accent); }
+
+/* The line under a connection drag. Drawn above the edges and never
+   clickable, because it is not an edge yet. */
+#edges path.preview {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+#edges path.preview.refused {
+  stroke: var(--error);
+}
+
+/* --- rubber band ----------------------------------------------------------
+
+   A child of the viewport, so it is positioned in graph coordinates and pans
+   and zooms with the nodes it is selecting. */
+
+.marquee {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: rgba(255, 162, 58, 0.12);
+  border-radius: 2px;
+  pointer-events: none;
+}
