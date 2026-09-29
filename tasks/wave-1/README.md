@@ -1,42 +1,37 @@
 # Wave 1 — Editor surface
 
-Parallel. Every task here branches from a `dev` that already contains wave 0,
-and no two tasks write the same file.
-
-## Tasks
+Parallel. Two tasks, both interface areas with their own directory.
 
 | Task | Territory | Deliverable |
 | --- | --- | --- |
-| `canvas` | `src/ui/assets/canvas/**` | Node graph: pan, zoom, node drag, edge routing, selection rectangle |
-| `inspector` | `src/ui/assets/inspector/**` | Property panel for the selected node, driven by the node type's schema |
-| `project-io` | `src/core/io/**` | Open/save dialogs, recent files, dirty tracking, save-on-close prompt |
-| `undo` | `src/core/history/**` | Command stack with coalescing, undo/redo, and a bounded depth |
+| `canvas` | `src/ui/assets/canvas/**` | Pan, zoom, node drag, edge routing, selection |
+| `inspector` | `src/ui/assets/inspector/**` | Property panel driven by the node type's schema |
 
-## Why these four
+## Why only two
 
-They are the four surfaces a user touches constantly, and each owns a distinct
-directory. `canvas` and `inspector` are both UI but never touch the same file:
-the canvas owns the graph area, the inspector owns the side panel, and they
-communicate through the document model rather than by calling each other.
+Wave 1 was planned as four. `undo` and `project-io` could not be two of them:
+both needed the host to own a document whose saved state is knowable, both
+needed new bridge messages, and both needed the page to handle new keys — three
+shared files.
 
-`project-io` and `undo` are both core but likewise disjoint. `undo` records
-commands against the model; `project-io` serialises the model. Neither needs
-to know the other exists.
+Worse, the territory check would have **passed**, because the declarations did
+not describe what the work required. A check that passes on a plan that cannot
+work is worse than no check, so the shared surface became its own wave.
 
-## Shared surfaces, and why they are not in this wave
+`session` (wave 1.6) lands it, and `project-io` (wave 1.7) follows alone.
 
-The document model, the message bridge protocol, and the root `CMakeLists.txt`
-are shared. They changed in wave 0 and are frozen for the duration of wave 1.
-A task that needs a change to a shared surface must say so in its task file
-and wait for a `core` task in wave 1.5 rather than editing it, because an edit
-to a shared file from inside a parallel wave is exactly the conflict the
-harness exists to prevent.
+## Running them
 
-If two tasks turn out to need the same change, that is a signal the change
-belongs in `core`, not that the territory rules should be relaxed.
+```powershell
+scripts/harness/wave-new.ps1 -Wave 1 -Task canvas
+scripts/harness/wave-new.ps1 -Wave 1 -Task inspector
+```
 
-## Merge order
+Both branch from a `dev` that contains the interface split, and neither touches
+a file the other owns. `session` runs alongside them; its territory
+(`src/app/**`, `ui.html`, `src/core/session/**`, `src/core/history/**`) does not
+overlap either.
 
-All four merge into `dev` independently. Order does not matter because their
-territories are disjoint; whoever is ready first merges first. Wave 2 does not
-start until all four are in.
+Each worktree needs its own WebView2 SDK — `third_party/` is git-ignored, so a
+fresh worktree has none. `scripts/fetch-deps.ps1` fetches it, or copy it from
+an existing checkout.

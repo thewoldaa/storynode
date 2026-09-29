@@ -18,14 +18,53 @@ Sequential. Everything depends on it.
 
 ## Wave 1 — Editor surface
 
-Parallel. Four disjoint surfaces.
+Parallel, two tasks. Both are interface areas with their own directory.
 
 | Task | Status | Territory | Deliverable |
 | --- | --- | --- | --- |
 | `canvas` | Planned | `src/ui/assets/canvas/**` | Pan, zoom, node drag, edge routing, selection |
 | `inspector` | Planned | `src/ui/assets/inspector/**` | Property panel driven by node-type schema |
-| `project-io` | Planned | `src/core/io/**` | File dialogs, recent files, dirty tracking |
-| `undo` | Planned | `src/core/history/**` | Command stack, coalescing, bounded depth |
+
+## Wave 1.6 — The document session
+
+Parallel with wave 1. Lands the surface the two tasks below both need.
+
+| Task | Status | Deliverable |
+| --- | --- | --- |
+| `session` | Planned | `DocumentSession`, the undo stack, the undo/redo messages, and the saved-state marker |
+
+### Why the original four became two plus two
+
+Wave 1 was planned as four parallel tasks. `undo` and `project-io` could not be
+two of them:
+
+| Task | Declared territory | What it actually needed |
+| --- | --- | --- |
+| `undo` | `src/core/history/**` | plus `Bridge`, `ui.html`, `main.cpp` |
+| `project-io` | `src/core/io/**` | plus `main.cpp`, `Bridge`, `ui.html` |
+
+Both needed the host to own a document whose saved state is knowable, both
+needed new bridge messages, and both needed the page to handle new keys. The
+territory check would have **passed anyway**, because the declarations did not
+describe what the work required.
+
+A check that passes on a plan that cannot work is worse than no check. The
+shared surface became `session`, which is what [CONTRIBUTING.md](../CONTRIBUTING.md)
+says to do when two tasks need the same change.
+
+## Wave 1.7 — Project I/O
+
+Sequential, one task, after `session`.
+
+| Task | Status | Territory | Deliverable |
+| --- | --- | --- | --- |
+| `project-io` | Planned | `src/core/io/**`, `src/app/**` | Recent files, save recovery, autosave, file association |
+
+It owns `src/app/**` because it is the task that puts files on the user's disk,
+so it owns the menu, the dialogs, the window title and drag-and-drop. That
+overlap with `undo` is exactly why the two could not run together.
+
+## Wave 2 — Node types
 
 ## Wave 1.5 — Split the interface
 
