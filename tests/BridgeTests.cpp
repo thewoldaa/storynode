@@ -742,3 +742,34 @@ TEST(BridgeDiscardsTheHistoryOnReplacement)
     CHECK_EQ(fixture.sender.LastOfType("history")["canUndo"].AsBool(), false);
     CHECK_EQ(fixture.story.nodes.size(), std::size_t(1));
 }
+
+// --- edits that change nothing ----------------------------------------------
+
+TEST(ARefusedMoveDoesNotReportAChange)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    // The page sends a move when a drag ends. A click that did not move the
+    // node arrives here too, and it is not an edit: reporting one would mark
+    // the document dirty for a drag that did nothing.
+    CHECK_FALSE(fixture.Send(R"({"type":"moveNode","id":"dialog-1","x":400,"y":120})"));
+    CHECK_EQ(fixture.sender.LastOfType("document")["dirty"].AsBool(), false);
+    CHECK_EQ(fixture.sender.LastOfType("history")["canUndo"].AsBool(), false);
+}
+
+TEST(ASetPropertyToTheSameValueDoesNotReportAChange)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    // The inspector sends the field on blur. Focusing a field and leaving it
+    // without typing is not an edit, and an undo step for it would appear to
+    // do nothing when the user pressed Ctrl+Z.
+    fixture.Send(R"({"type":"setProperty","id":"dialog-1","key":"speaker",)"
+                 R"("value":"Narrator"})");
+    CHECK_FALSE(fixture.Send(R"({"type":"setProperty","id":"dialog-1","key":"speaker",)"
+                             R"("value":"Narrator"})"));
+
+    CHECK_EQ(fixture.sender.LastOfType("history")["undoDepth"].AsInt(), std::int64_t(1));
+}

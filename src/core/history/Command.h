@@ -126,9 +126,14 @@ struct Command
     // -- use ------------------------------------------------------------------
 
     /// True when applying this command would leave the document exactly as it
-    /// is. Only a move can be a no-op: the other kinds are built only when
-    /// there is something to do.
-    bool IsNoop() const;
+    /// is, so there is nothing to record and nothing to undo.
+    ///
+    /// Two cases. A move that ends where it started — the user pressed the
+    /// button and let go without moving — and a property set to the value it
+    /// already has, which the inspector sends when a field is focused and
+    /// blurred without being typed into. Recording either would leave a step
+    /// in the stack that undoes to the state the user is already looking at.
+    bool IsNoop(const Story& story) const;
 
     /// Apply the edit. Returns false, and changes nothing, when the document
     /// does not contain what the command names.

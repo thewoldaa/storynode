@@ -158,9 +158,38 @@ Command Command::MakeDisconnect(const Story& story, const std::string& edgeId)
 
 // --- use --------------------------------------------------------------------
 
-bool Command::IsNoop() const
+bool Command::IsNoop(const Story& story) const
 {
-    return kind == Kind::MoveNode && SamePosition(move.from, move.to);
+    if (kind == Kind::MoveNode)
+    {
+        return SamePosition(move.from, move.to);
+    }
+
+    if (kind == Kind::SetProperty)
+    {
+        const Node* target = story.FindNode(property.nodeId);
+        if (!target)
+        {
+            return false;
+        }
+
+        const json::Value* current = target->data.Find(property.key);
+        if (!property.hadBefore || !current)
+        {
+            // The key was not there when the command was built. Writing it is
+            // a change, whatever it holds — including null, which adds a key
+            // the document did not have.
+            return false;
+        }
+
+        // Compared by serialised form. json::Value has no equality operator,
+        // and adding one would be a wider change than this needs; the two
+        // values here are small, and a document is not compared this way in a
+        // loop.
+        return current->Serialize() == property.after.Serialize();
+    }
+
+    return false;
 }
 
 bool Command::Apply(Story& story) const

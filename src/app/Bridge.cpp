@@ -254,8 +254,11 @@ void Bridge::HandleMoveNode(const json::Value& message)
     // Built from the document's current position rather than from what the
     // page sent. The page could be a message behind, and recording its idea of
     // "before" would make the undo land somewhere the node never was.
-    _session.Apply(Command::MakeMoveNode(id, from, to));
-    _changed = true;
+    //
+    // A refused command is not a change. Reporting one would mark the document
+    // dirty for a drag that ended where it started, and the user would be
+    // asked to save work they had not done.
+    _changed = _session.Apply(Command::MakeMoveNode(id, from, to));
 
     SendAll();
 }
@@ -281,8 +284,7 @@ void Bridge::HandleAddNode(const json::Value& message)
     node.ports.push_back(Port { "in", "In", Port::Kind::Input, Port::DataType::Flow, false });
     node.ports.push_back(Port { "out", "Out", Port::Kind::Output, Port::DataType::Flow, false });
 
-    _session.Apply(Command::MakeAddNode(std::move(node)));
-    _changed = true;
+    _changed = _session.Apply(Command::MakeAddNode(std::move(node)));
 
     SendAll();
 }
@@ -303,8 +305,7 @@ void Bridge::HandleRemoveNode(const json::Value& message)
 
     // Edges go with the node. Leaving them would produce a document that
     // fails validation the instant it is touched.
-    _session.Apply(command);
-    _changed = true;
+    _changed = _session.Apply(command);
 
     SendAll();
 }
@@ -332,8 +333,8 @@ void Bridge::HandleSetProperty(const json::Value& message)
         return;
     }
 
-    _session.Apply(Command::MakeSetProperty(_session.Document(), id, key, *value));
-    _changed = true;
+    _changed = _session.Apply(
+        Command::MakeSetProperty(_session.Document(), id, key, *value));
 
     SendAll();
 }
@@ -364,8 +365,7 @@ void Bridge::HandleConnect(const json::Value& message)
     edge.from = Endpoint { fromNode, fromPort };
     edge.to = Endpoint { toNode, toPort };
 
-    _session.Apply(Command::MakeConnect(std::move(edge)));
-    _changed = true;
+    _changed = _session.Apply(Command::MakeConnect(std::move(edge)));
 
     SendAll();
 }
@@ -381,8 +381,7 @@ void Bridge::HandleDisconnect(const json::Value& message)
         return;
     }
 
-    _session.Apply(command);
-    _changed = true;
+    _changed = _session.Apply(command);
 
     SendAll();
 }

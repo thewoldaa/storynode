@@ -53,18 +53,18 @@ public:
 
     /// Apply a command, recording it for undo.
     ///
-    /// A command that does nothing — one naming something the document does
-    /// not have, or a move that ends where it started — is dropped rather than
-    /// recorded, so the user is not asked to press undo twice for one visible
-    /// change.
-    void Apply(Command command);
+    /// Returns false when the command does nothing — one naming something the
+    /// document does not have, or an edit that would leave the document as it
+    /// already is. A refused command is not recorded, so the user is not asked
+    /// to press undo twice for one visible change.
+    bool Apply(Command command);
 
     /// Apply a command at an explicit time.
     ///
     /// The coalescing window is measured against a clock, and a test that had
     /// to sleep to cross it would be slow and flaky. Injecting the time is how
     /// the window is tested without either.
-    void ApplyAt(Command command, HistoryClock::time_point now);
+    bool ApplyAt(Command command, HistoryClock::time_point now);
 
     bool CanUndo() const { return _history.CanUndo(); }
     bool CanRedo() const { return _history.CanRedo(); }

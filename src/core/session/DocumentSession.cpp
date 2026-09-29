@@ -17,14 +17,14 @@ DocumentSession::DocumentSession(Story document, std::size_t historyLimit)
 {
 }
 
-void DocumentSession::Apply(Command command)
+bool DocumentSession::Apply(Command command)
 {
-    ApplyAt(std::move(command), HistoryClock::now());
+    return ApplyAt(std::move(command), HistoryClock::now());
 }
 
-void DocumentSession::ApplyAt(Command command, HistoryClock::time_point now)
+bool DocumentSession::ApplyAt(Command command, HistoryClock::time_point now)
 {
-    _history.Apply(_document, std::move(command), now);
+    return _history.Apply(_document, std::move(command), now);
 }
 
 bool DocumentSession::Undo()

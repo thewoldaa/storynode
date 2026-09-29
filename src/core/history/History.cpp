@@ -15,7 +15,7 @@ bool History::Apply(Story& story, Command command)
 
 bool History::Apply(Story& story, Command command, HistoryClock::time_point now)
 {
-    if (command.kind == Command::Kind::None || command.IsNoop())
+    if (command.kind == Command::Kind::None || command.IsNoop(story))
     {
         return false;
     }

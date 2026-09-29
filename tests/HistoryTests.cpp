@@ -396,3 +396,46 @@ TEST(UndoOfADisconnectPutsTheEdgeBackWhereItWas)
     CHECK_EQ(story.edges[0].id, std::string("edge-1"));
     CHECK_EQ(story.edges[1].id, std::string("edge-2"));
 }
+
+// --- edits that change nothing ----------------------------------------------
+//
+// A step that undoes to the state the user is already looking at is an undo
+// that appears to do nothing. Both of these are ordinary: a click that did not
+// move a node, and a field focused and blurred without being typed into.
+
+TEST(SettingAPropertyToItsCurrentValueIsRefused)
+{
+    Story story = MakeStory();
+    story.nodes[1].data.Set("speaker", json::Value("Narrator"));
+
+    History history;
+    CHECK_FALSE(history.Apply(story, Command::MakeSetProperty(
+        story, "dialog-1", "speaker", json::Value("Narrator"))));
+    CHECK_FALSE(history.CanUndo());
+}
+
+TEST(SettingAPropertyToADifferentValueIsRecorded)
+{
+    Story story = MakeStory();
+    story.nodes[1].data.Set("speaker", json::Value("Narrator"));
+
+    History history;
+    CHECK(history.Apply(story, Command::MakeSetProperty(
+        story, "dialog-1", "speaker", json::Value("Guard"))));
+    CHECK_EQ(history.Depth(), std::size_t(1));
+}
+
+TEST(SettingAPropertyThatDidNotExistToNullIsRecorded)
+{
+    // Null is not "no key". Adding a null property is a change to the
+    // document, and an undo has to remove the key again.
+    Story story = MakeStory();
+
+    History history;
+    CHECK(history.Apply(story, Command::MakeSetProperty(
+        story, "dialog-1", "speaker", json::Value(nullptr))));
+    CHECK(story.FindNode("dialog-1")->data.Has("speaker"));
+
+    CHECK(history.Undo(story));
+    CHECK_FALSE(story.FindNode("dialog-1")->data.Has("speaker"));
+}
