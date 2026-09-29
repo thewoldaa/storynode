@@ -38,6 +38,16 @@ namespace {
 const wchar_t* kWindowClass = L"StoryNodeMainWindow";
 const wchar_t* kWindowTitle = L"StoryNode";
 
+/// Command ids for the Edit menu.
+///
+/// Declared here rather than in the resource header beside the File ids. The
+/// resource header is shared with the interface asset directory, which this
+/// task does not own, and adding two constants to it would be an edit outside
+/// this task's territory for no benefit. The values continue the same range so
+/// nothing can collide.
+constexpr UINT kCommandUndo = 40008;
+constexpr UINT kCommandRedo = 40009;
+
 HWND g_window = nullptr;
 HMENU g_menu = nullptr;
 
@@ -223,9 +233,9 @@ void UpdateEditMenu()
     {
         return;
     }
-    EnableMenuItem(g_menu, ID_EDIT_UNDO,
+    EnableMenuItem(g_menu, kCommandUndo,
                    MF_BYCOMMAND | (g_session.CanUndo() ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(g_menu, ID_EDIT_REDO,
+    EnableMenuItem(g_menu, kCommandRedo,
                    MF_BYCOMMAND | (g_session.CanRedo() ? MF_ENABLED : MF_GRAYED));
 }
 
@@ -594,11 +604,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
             SaveDocument(true);
             return 0;
 
-        case ID_EDIT_UNDO:
+        case kCommandUndo:
             ApplyHistoryCommand(true);
             return 0;
 
-        case ID_EDIT_REDO:
+        case kCommandRedo:
             ApplyHistoryCommand(false);
             return 0;
 
@@ -678,8 +688,8 @@ HMENU BuildMenu()
     // it. The items are enabled by UpdateEditMenu, which is the only place
     // that decides.
     HMENU edit = CreatePopupMenu();
-    AppendMenuW(edit, MF_STRING, ID_EDIT_UNDO, L"&Undo\tCtrl+Z");
-    AppendMenuW(edit, MF_STRING, ID_EDIT_REDO, L"&Redo\tCtrl+Y");
+    AppendMenuW(edit, MF_STRING, kCommandUndo, L"&Undo\tCtrl+Z");
+    AppendMenuW(edit, MF_STRING, kCommandRedo, L"&Redo\tCtrl+Y");
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(edit), L"&Edit");
 
     HMENU help = CreatePopupMenu();
@@ -700,9 +710,9 @@ HACCEL BuildAccelerators()
         { FVIRTKEY | FCONTROL | FSHIFT, 'S', ID_FILE_SAVE_AS },
         // Ctrl+Shift+Z as well as Ctrl+Y. Both are in use in the wild and a
         // user who reaches for the other one should not get a beep.
-        { FVIRTKEY | FCONTROL, 'Z', ID_EDIT_UNDO },
-        { FVIRTKEY | FCONTROL, 'Y', ID_EDIT_REDO },
-        { FVIRTKEY | FCONTROL | FSHIFT, 'Z', ID_EDIT_REDO },
+        { FVIRTKEY | FCONTROL, 'Z', kCommandUndo },
+        { FVIRTKEY | FCONTROL, 'Y', kCommandRedo },
+        { FVIRTKEY | FCONTROL | FSHIFT, 'Z', kCommandRedo },
     };
     return CreateAcceleratorTableW(entries, static_cast<int>(std::size(entries)));
 }
