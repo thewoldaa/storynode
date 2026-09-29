@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z in the shell, and an Edit menu with Undo and
   Redo, enabled from the same source. The binding lives in the shell because
   undo is not a canvas or an inspector concern.
-- 28 unit tests for the stack and the session, 11 for the new bridge messages,
+- 31 unit tests for the stack and the session, 13 for the new bridge messages,
   and 4 for the new layout checks.
 - The layout check now counts the interface areas that registered with the
   shell, which is the only way to tell an area whose script threw from a
