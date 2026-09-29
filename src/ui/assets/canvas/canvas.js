@@ -334,11 +334,7 @@
         stats.elementMoves++;
       }
 
-      // The canvas's own set, not the shell's single anchor. The shell's
-      // selectedId is the one node the inspector shows; a rubber band over
-      // twenty nodes sets all twenty here and only one there, and drawing
-      // from the shell's id would mark one node and lose the rest.
-      applySelectionClass(entry.element, isSelected(node.id));
+      applySelectionClass(entry.element, isSelected(state, node.id));
     }
 
     for (var id in elements) {
@@ -589,41 +585,41 @@
 
   // --- selection -----------------------------------------------------------
   //
-  // The shell's selection is one id, because the inspector edits one node and
-  // a panel showing four nodes at once is a different panel. A canvas has to
-  // select several, so this area keeps the set and tells the shell which of
-  // them is the anchor — the one the inspector shows and the one a keyboard
-  // step moves from.
+  // The selection lives in the shell, not here.
   //
-  // The set is therefore presentation, like pan and zoom: the host never sees
-  // it, and a document message does not carry it.
-
-  var selected = [];      // ids, in the order they were added
-  var selectedSet = {};
-  var anchorId = null;
+  // An earlier version of this file kept the set privately and told the shell
+  // only an anchor, on the reasoning that the host never sees the set and so
+  // it is presentation, like pan and zoom. The host does not see it, and that
+  // reasoning was still wrong: two areas read it. The inspector shows the
+  // nodes the canvas selected, so a set the canvas keeps to itself is a set
+  // the inspector cannot see, and the disagreement only becomes visible once
+  // both areas exist.
+  //
+  // So this area reads `state.selectedIds` and writes it through
+  // `shell.selectMany`. It keeps nothing of its own except the anchor, which
+  // is which of the selected nodes a keyboard step moves from -- a fact about
+  // the gesture, not about the selection.
 
   // True while this area is the one changing the shell's selection, so that
   // the callback the shell fires does not look like the host changing it.
   var applyingSelection = false;
 
-  function isSelected(id) { return selectedSet[id] === true; }
-
-  function applySelection(ids, anchor) {
-    selected = [];
-    selectedSet = {};
+  function isSelected(state, id) {
+    var ids = state.selectedIds || [];
     for (var i = 0; i < ids.length; i++) {
-      if (!selectedSet[ids[i]]) {
-        selectedSet[ids[i]] = true;
-        selected.push(ids[i]);
-      }
+      if (ids[i] === id) { return true; }
     }
-    anchorId = anchor || selected[0] || null;
+    return false;
+  }
 
-    // The shell drops the call when the id is unchanged, and the render it
-    // would have triggered is the one that draws the selection. So the render
-    // is requested here rather than assumed.
+  /// Change the selection through the shell.
+  ///
+  /// The shell drops a call that changes nothing, and the render it would have
+  /// triggered is the one that draws the selection, so the render is requested
+  /// here rather than assumed.
+  function applySelection(ids, anchor) {
     applyingSelection = true;
-    shell.select(anchorId);
+    shell.selectMany(ids, anchor);
     applyingSelection = false;
     shell.render();
   }
@@ -631,21 +627,33 @@
   function selectOne(id) { applySelection(id ? [id] : [], id); }
 
   function toggleSelected(id) {
-    var ids = selected.slice();
+    var state = shell.state;
+    var ids = (state.selectedIds || []).slice();
     var index = ids.indexOf(id);
+    var anchor = state.selectedId;
+
     if (index >= 0) {
       ids.splice(index, 1);
-      applySelection(ids, anchorId === id ? null : anchorId);
+      // Removing the anchor moves the anchor to whatever is left, rather than
+      // leaving it naming a node that is no longer selected.
+      applySelection(ids, anchor === id ? null : anchor);
     } else {
       ids.push(id);
       applySelection(ids, id);
     }
   }
 
+  /// The selected nodes, in the order the document lists them.
+  ///
+  /// Read from the shell rather than kept here: the shell normalises the order
+  /// and drops ids the document no longer has, so this cannot disagree with
+  /// what the inspector is showing.
   function selectedNodes() {
+    var state = shell.state;
     var nodes = [];
-    for (var i = 0; i < selected.length; i++) {
-      var node = nodeById(selected[i]);
+    var ids = state.selectedIds || [];
+    for (var i = 0; i < ids.length; i++) {
+      var node = nodeById(ids[i]);
       if (node) { nodes.push(node); }
     }
     return nodes;
@@ -700,7 +708,7 @@
       toggleSelected(id);
       return;
     }
-    if (!isSelected(id)) {
+    if (!isSelected(shell.state, id)) {
       selectOne(id);
     }
 
@@ -814,7 +822,7 @@
       kind: "marquee",
       start: world,
       additive: event.shiftKey || event.ctrlKey || event.metaKey,
-      base: selected.slice()
+      base: (shell.state.selectedIds || []).slice()
     };
     event.preventDefault();
   }
@@ -846,23 +854,24 @@
 
     // applySelection asks for a render, and a render is a full pass over the
     // document. During a drag only the selection classes change, so they are
-    // written here and the shell is told without the render.
-    selected = ids;
-    selectedSet = {};
-    for (var j = 0; j < ids.length; j++) { selectedSet[ids[j]] = true; }
-    anchorId = ids[0] || null;
-    paintSelection();
+    // written here from the ids this gesture computed, and the shell is told
+    // once when the gesture ends.
+    //
+    // The shell's state is deliberately not updated per frame: a document
+    // message arriving mid-drag would otherwise re-enter and fight the gesture
+    // for the selection.
+    gesture.preview = ids;
+    paintSelection(ids);
   }
 
   function endMarquee() {
-    // The set was updated live; this is where the shell and the other areas
-    // are told about it.
-    applyingSelection = true;
-    shell.select(anchorId);
-    applyingSelection = false;
-    shell.render();
+    var ids = gesture.preview || [];
     clearMarquee();
     gesture = null;
+
+    // The gesture is over, so this is where the shell and the other areas --
+    // the inspector among them -- are told what was selected.
+    applySelection(ids, ids.length ? ids[0] : null);
   }
 
   function marqueeRect(a, b) {
@@ -887,10 +896,17 @@
   }
 
   /// Write the selection classes without a full render.
-  function paintSelection() {
+  ///
+  /// Takes the ids rather than reading them, because during a marquee the
+  /// selection being previewed is not yet the shell's -- the shell is told
+  /// once, when the gesture ends.
+  function paintSelection(ids) {
+    var wanted = {};
+    for (var i = 0; i < ids.length; i++) { wanted[ids[i]] = true; }
+
     for (var id in elements) {
       if (elements.hasOwnProperty(id)) {
-        applySelectionClass(elements[id].element, selectedSet[id] === true);
+        applySelectionClass(elements[id].element, wanted[id] === true);
       }
     }
   }
@@ -1122,7 +1138,8 @@
     var nodes = (state.document && state.document.nodes) || [];
     if (nodes.length === 0) { return null; }
 
-    var from = anchorId ? nodeById(anchorId) : null;
+    var anchor = state.selectedId;
+    var from = anchor ? nodeById(anchor) : null;
     if (!from) {
       // Nothing selected: the first arrow press selects rather than moving.
       return nodes[0];
@@ -1159,9 +1176,10 @@
     var nodes = (state.document && state.document.nodes) || [];
     if (nodes.length === 0) { return; }
 
+    var anchor = state.selectedId;
     var index = 0;
     for (var i = 0; i < nodes.length; i++) {
-      if (nodes[i].id === anchorId) { index = i; break; }
+      if (nodes[i].id === anchor) { index = i; break; }
     }
     index = (index + offset + nodes.length) % nodes.length;
     selectOne(nodes[index].id);
@@ -1224,7 +1242,7 @@
     // One message per node, at the moment the key is pressed rather than per
     // frame. The bridge removes one node per message; a group delete is
     // therefore several, which is the same trade the group move makes.
-    var ids = selected.slice();
+    var ids = (shell.state.selectedIds || []).slice();
     if (ids.length === 0) { return; }
     for (var i = 0; i < ids.length; i++) {
       shell.post({ type: "removeNode", id: ids[i] });
@@ -1362,7 +1380,7 @@
     }
 
     if (event.key === "Delete" || event.key === "Backspace") {
-      if (selected.length > 0) {
+      if ((shell.state.selectedIds || []).length > 0) {
         removeSelected();
         event.preventDefault();
       }
@@ -1473,15 +1491,14 @@
     },
 
     onSelectionChanged: function (state) {
-      // The host, or the inspector, changed the shell's selection. Adopting it
-      // as the whole set is what keeps the canvas from showing three selected
-      // nodes while the inspector edits a fourth.
+      // The host, the inspector or the keyboard changed the shell's selection.
+      //
+      // There is nothing to copy: the canvas reads the set from the shell on
+      // every render, so a change made anywhere is already visible here. The
+      // callback exists so that a change made elsewhere redraws the graph, and
+      // the shell renders after it fires.
       if (applyingSelection) { return; }
-      if (state.selectedId === anchorId) { return; }
-      selected = state.selectedId ? [state.selectedId] : [];
-      selectedSet = {};
-      if (state.selectedId) { selectedSet[state.selectedId] = true; }
-      anchorId = state.selectedId;
+      void state;
     }
   });
 
@@ -1503,7 +1520,7 @@
       for (var id in elements) {
         if (elements.hasOwnProperty(id)) { copy.nodes++; }
       }
-      copy.selected = selected.length;
+      copy.selected = (shell.state.selectedIds || []).length;
       return copy;
     },
     resetStats: function () {
