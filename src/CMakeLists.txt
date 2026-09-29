@@ -17,13 +17,15 @@
 # window and no message loop. This is what makes the model testable and what
 # lets the parallel tasks in later waves be genuinely independent.
 
-file(GLOB_RECURSE STORYNODE_CORE_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp")
+file(
+    GLOB_RECURSE STORYNODE_CORE_SOURCES
+    CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp"
+)
 
 add_library(storynode_core STATIC ${STORYNODE_CORE_SOURCES})
 
-target_include_directories(storynode_core
-    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(storynode_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
 target_compile_options(storynode_core PRIVATE ${STORYNODE_WARNINGS})
 
@@ -38,13 +40,19 @@ target_compile_options(storynode_core PRIVATE ${STORYNODE_WARNINGS})
 # Windows-only.
 # ---------------------------------------------------------------------------
 
-file(GLOB STORYNODE_BRIDGE_SOURCES CONFIGURE_DEPENDS
+file(
+    GLOB STORYNODE_BRIDGE_SOURCES
+    CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/app/Bridge.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/app/LayoutReport.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/LayoutReport.cpp"
+)
 
 if(STORYNODE_BRIDGE_SOURCES)
     add_library(storynode_bridge STATIC ${STORYNODE_BRIDGE_SOURCES})
-    target_include_directories(storynode_bridge PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_include_directories(
+        storynode_bridge
+        PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
     target_link_libraries(storynode_bridge PUBLIC storynode_core)
     target_compile_options(storynode_bridge PRIVATE ${STORYNODE_WARNINGS})
 endif()
@@ -57,12 +65,18 @@ endif()
 # ---------------------------------------------------------------------------
 
 if(WIN32)
-    file(GLOB_RECURSE STORYNODE_PLATFORM_SOURCES CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.cpp")
+    file(
+        GLOB_RECURSE STORYNODE_PLATFORM_SOURCES
+        CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.cpp"
+    )
 
     if(STORYNODE_PLATFORM_SOURCES)
         add_library(storynode_platform STATIC ${STORYNODE_PLATFORM_SOURCES})
-        target_include_directories(storynode_platform PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_include_directories(
+            storynode_platform
+            PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
         target_link_libraries(storynode_platform PUBLIC storynode_core)
         target_compile_options(storynode_platform PRIVATE ${STORYNODE_WARNINGS})
         target_link_libraries(storynode_platform PRIVATE comdlg32 shell32 ole32)
@@ -74,21 +88,34 @@ endif()
 # ---------------------------------------------------------------------------
 
 if(WIN32 AND STORYNODE_BUILD_APP AND STORYNODE_HAVE_WEBVIEW2)
-
-    file(GLOB_RECURSE STORYNODE_APP_SOURCES CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/app/*.cpp")
+    file(
+        GLOB_RECURSE STORYNODE_APP_SOURCES
+        CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/app/*.cpp"
+    )
 
     add_executable(storynode WIN32 ${STORYNODE_APP_SOURCES})
 
-    target_include_directories(storynode PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ui/assets"
-        "${STORYNODE_WEBVIEW2_DIR}/build/native/include")
+    target_include_directories(
+        storynode
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/ui/assets"
+            "${STORYNODE_WEBVIEW2_DIR}/build/native/include"
+    )
 
-    target_link_libraries(storynode PRIVATE
-        storynode_core
-        "${STORYNODE_WEBVIEW2_DIR}/build/native/x64/WebView2LoaderStatic.lib"
-        user32 gdi32 ole32 oleaut32 shlwapi version)
+    target_link_libraries(
+        storynode
+        PRIVATE
+            storynode_core
+            "${STORYNODE_WEBVIEW2_DIR}/build/native/x64/WebView2LoaderStatic.lib"
+            user32
+            gdi32
+            ole32
+            oleaut32
+            shlwapi
+            version
+    )
 
     if(TARGET storynode_bridge)
         target_link_libraries(storynode PRIVATE storynode_bridge)
@@ -119,6 +146,10 @@ if(WIN32 AND STORYNODE_BUILD_APP AND STORYNODE_HAVE_WEBVIEW2)
     endif()
 
     # The resource compiler needs to find ui.html next to app.rc.
-    set_property(TARGET storynode PROPERTY
-        VS_GLOBAL_ResourceIncludePath "${CMAKE_CURRENT_SOURCE_DIR}/ui/assets")
+    set_property(
+        TARGET storynode
+        PROPERTY
+            VS_GLOBAL_ResourceIncludePath
+                "${CMAKE_CURRENT_SOURCE_DIR}/ui/assets"
+    )
 endif()

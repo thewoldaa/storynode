@@ -7,13 +7,18 @@
 # anywhere.
 # ---------------------------------------------------------------------------
 
-file(GLOB STORYNODE_TEST_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+file(
+    GLOB STORYNODE_TEST_SOURCES
+    CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+)
 
 add_executable(storynode_tests ${STORYNODE_TEST_SOURCES})
 
-target_include_directories(storynode_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(
+    storynode_tests
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
+)
 
 target_link_libraries(storynode_tests PRIVATE storynode_core)
 

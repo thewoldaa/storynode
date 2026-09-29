@@ -34,10 +34,8 @@
     },
     {
       "name": "ci",
-      "displayName": "CI (Visual Studio 2022)",
-      "description": "The build CI runs. Fixed binary directory so the workflow can find the test log.",
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64",
+      "displayName": "CI",
+      "description": "The build CI runs. No generator is named, so CMake picks the newest Visual Studio the runner has: pinning it here means CI breaks the day the runner image changes its default, which is a failure with no relationship to this code. Fixed binary directory so the workflow can find the test log.",
       "binaryDir": "${sourceDir}/build/ci",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",

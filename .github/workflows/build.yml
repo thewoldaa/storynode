@@ -25,18 +25,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      # gersemi reformats CMake without configuring a project, so it runs
-      # before the SDK download and catches formatting drift early.
       - name: Install gersemi
         run: pip install gersemi
 
+      # gersemi reformats CMake. It is given CMakeLists.txt files only:
+      # CMakePresets.json is JSON, and handing it to a CMake parser fails with
+      # "unbalanced parentheses" on the opening brace, which looks like a
+      # formatting problem and is not one.
       - name: Check formatting
         run: |
           gersemi --check \
             CMakeLists.txt \
-            CMakePresets.json \
             src/CMakeLists.txt \
-            tests/CMakeLists.txt
+            tests/CMakeLists.txt \
+            tests/VerifyCMakeLists.txt
 
   build-windows:
     name: build and test (windows)

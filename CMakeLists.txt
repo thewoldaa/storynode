@@ -10,10 +10,12 @@
 
 cmake_minimum_required(VERSION 3.25)
 
-project(storynode
+project(
+    storynode
     VERSION 0.1.0
     DESCRIPTION "Visual editor for branching interactive fiction"
-    LANGUAGES CXX)
+    LANGUAGES CXX
+)
 
 # ---------------------------------------------------------------------------
 # Language level
@@ -79,18 +81,23 @@ option(STORYNODE_BUILD_APP "Build the editor application" ON)
 # SDK can work on the model and the format.
 # ---------------------------------------------------------------------------
 
-set(STORYNODE_WEBVIEW2_DIR "${CMAKE_SOURCE_DIR}/third_party/WebView2.1.0.4129.50"
-    CACHE PATH "Directory containing the extracted WebView2 SDK")
+set(STORYNODE_WEBVIEW2_DIR
+    "${CMAKE_SOURCE_DIR}/third_party/WebView2.1.0.4129.50"
+    CACHE PATH
+    "Directory containing the extracted WebView2 SDK"
+)
 
 set(STORYNODE_HAVE_WEBVIEW2 OFF)
 if(WIN32 AND STORYNODE_BUILD_APP)
     if(EXISTS "${STORYNODE_WEBVIEW2_DIR}/build/native/include/WebView2.h")
         set(STORYNODE_HAVE_WEBVIEW2 ON)
     else()
-        message(WARNING
+        message(
+            WARNING
             "WebView2 SDK not found at ${STORYNODE_WEBVIEW2_DIR}.\n"
             "The editor application will not be built.\n"
-            "Run: powershell -ExecutionPolicy Bypass -File scripts/fetch-deps.ps1")
+            "Run: powershell -ExecutionPolicy Bypass -File scripts/fetch-deps.ps1"
+        )
     endif()
 endif()
 
