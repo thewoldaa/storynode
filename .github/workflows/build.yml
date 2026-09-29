@@ -37,6 +37,7 @@ jobs:
           gersemi --check \
             CMakeLists.txt \
             src/CMakeLists.txt \
+            src/tools/CMakeLists.txt \
             tests/CMakeLists.txt \
             tests/VerifyCMakeLists.txt
 

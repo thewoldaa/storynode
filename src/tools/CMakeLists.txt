@@ -28,15 +28,19 @@ if(NOT WIN32)
 endif()
 
 if(NOT DEFINED STORYNODE_UI_RC OR NOT EXISTS "${STORYNODE_UI_RC}")
-    message(WARNING
+    message(
+        WARNING
         "probe_resources needs the generated resource script, which only "
         "exists when the application is built. Configure with "
-        "-DSTORYNODE_BUILD_APP=ON and the WebView2 SDK present.")
+        "-DSTORYNODE_BUILD_APP=ON and the WebView2 SDK present."
+    )
     return()
 endif()
 
-add_executable(probe_resources
+add_executable(
+    probe_resources
     "${CMAKE_CURRENT_SOURCE_DIR}/probe-resources.cpp"
-    "${STORYNODE_UI_RC}")
+    "${STORYNODE_UI_RC}"
+)
 
 target_compile_definitions(probe_resources PRIVATE UNICODE _UNICODE)

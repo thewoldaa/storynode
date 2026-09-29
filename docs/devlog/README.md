@@ -15,3 +15,5 @@ YYYY-MM-DD.md
 ## Index
 
 - [2026-09-29](2026-09-29.md) — repository scaffold, parallel-work harness
+- [2026-09-29 (wave 1.5)](2026-09-29-wave-1.5.md) — interface split, seven core
+  defects found by review, and one introduced while fixing them

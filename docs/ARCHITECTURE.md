@@ -112,6 +112,54 @@ forgotten in the list would be written twice, once from the struct and once
 from `extra` — which is why the parser rejects duplicate keys rather than
 silently taking the last one.
 
+## The interface is split, and why
+
+```
+src/ui/assets/
+  ui.html              the shell: markup, message protocol, document state,
+                       and the render loop
+  canvas/              the graph area, its stylesheet and its script
+  inspector/           the property panel, its stylesheet and its script
+  styles/theme.css     the tokens and the chrome the shell owns
+```
+
+Each area registers itself with the shell and is called back to render. The
+shell never calls an area by name, and an area never reads another area's
+state. That is what makes the two independent enough to be written by two
+tasks at once.
+
+This is not tidiness. Wave 1 runs four tasks in parallel, two of which work on
+the interface, and a single file holding both would make those two edit the
+same file — the conflict the worktree harness exists to prevent, and one its
+territory check refuses to start.
+
+### How the assets get into the page
+
+The page cannot load its own assets. It is delivered with `NavigateToString`,
+which gives it an opaque origin, so a `<script src>` or a `fetch` to a sibling
+is refused by the browser engine and there is no local server to ask instead.
+
+So the build embeds every asset as a resource and the host inlines them into
+the shell before navigating. The asset list is generated from a glob, not
+written by hand: a hand-written list would be a shared file every task must
+edit, which is the same problem one level down.
+
+Adding a `.js` file under `canvas/` therefore makes it load, with no edit to
+any file outside `canvas/`.
+
+Two properties of the generated resource script cost real time to find, and
+are recorded in `cmake/GenerateUiResources.cmake`:
+
+- `rc.exe` does not treat quotes as delimiters around a resource name; it
+  stores them as part of the name. A name written as `"UI.HTML"` is nine
+  characters long, and a lookup for the seven-character name finds nothing.
+- CMake treats a backslash in a string as an escape introducer, so a Windows
+  path written into a generated file silently loses characters.
+
+Both produce the same symptom: the asset is in the binary, cannot be found,
+and the application shows a blank window with no error anywhere.
+`probe_resources` exists to make that visible.
+
 ## Verification
 
 The interface is verified by having the page measure itself and report back

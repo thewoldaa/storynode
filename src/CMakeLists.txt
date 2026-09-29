@@ -161,13 +161,18 @@ if(WIN32 AND STORYNODE_BUILD_APP AND STORYNODE_HAVE_WEBVIEW2)
     # so those two variables are the whole interface to it.
     include("${CMAKE_SOURCE_DIR}/cmake/GenerateUiResources.cmake")
 
-    target_include_directories(storynode PRIVATE "${STORYNODE_UI_GENERATED_DIR}")
+    target_include_directories(
+        storynode
+        PRIVATE "${STORYNODE_UI_GENERATED_DIR}"
+    )
 
     # The generated resource script needs the same UNICODE defines as the C++,
     # or the resource compiler is not guaranteed to agree about the encoding of
     # the names it writes.
-    set_source_files_properties("${STORYNODE_UI_RC}" PROPERTIES
-        COMPILE_DEFINITIONS "UNICODE;_UNICODE")
+    set_source_files_properties(
+        "${STORYNODE_UI_RC}"
+        PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE"
+    )
 
     # The icons and version information stay hand-written: they are not part of
     # the interface split and there are only two of them.
