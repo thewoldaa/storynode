@@ -127,19 +127,35 @@ harness_require_task_file() {
 
 # Print the territory entries of a task file, one per line.
 #
-# Reads the lines under "## Territory" until the next "##" heading. Only lines
-# beginning with "- " are taken, and inline comments after " #" are stripped,
-# so the file stays readable.
+# Reads the lines under "## Territory" until the next heading at the SAME
+# level. A deeper heading — "### Why the core is in scope" — does not end the
+# section, but its bullet list must not be mistaken for territory either.
+#
+# That distinction is not cosmetic. Without it, a bullet list in a sub-section
+# explaining a decision is read as a set of file claims, which both corrupts
+# the overlap check and silently widens what the task is allowed to touch. The
+# rules for what counts as territory should not be loosenable by writing prose
+# under them.
+#
+# So an entry is a bullet that looks like a path: no whitespace, and only the
+# characters a path can contain. Note the asterisk in that set — leaving it out
+# drops every wildcard claim, which makes the overlap check useless in the
+# quietest possible way: two tasks could both claim src/core/** and neither
+# would be seen.
 harness_task_territory() {
   local file="$1"
   awk '
     /^##[[:space:]]+Territory[[:space:]]*$/ { in_section = 1; next }
     /^##[[:space:]]/ { in_section = 0 }
+    /^###[[:space:]]/ { next }
     in_section && /^[[:space:]]*-[[:space:]]/ {
       sub(/^[[:space:]]*-[[:space:]]*/, "")
       sub(/[[:space:]]+#.*$/, "")
       gsub(/[[:space:]]+$/, "")
-      if (length($0) > 0) print
+      # A path claim: no whitespace anywhere, and no prose punctuation.
+      # "src/core/**" qualifies. "Two of them are in the file format."
+      # does not, because of the spaces.
+      if ($0 ~ /^[A-Za-z0-9._*\/-]+$/ && length($0) > 0) print
     }
   ' "$file"
 }
@@ -347,6 +363,13 @@ harness_check_task_changes() {
 
   local -a outside=()
   for f in "${changed[@]}"; do
+    # A task always owns its own declaration. Requiring a task to list its
+    # declaration in its declaration is a circle, and the file is the task's
+    # own description of itself.
+    if [ "$f" = "tasks/wave-${wave}/${task}.md" ]; then
+      continue
+    fi
+
     # Territory is checked against committed paths only. A file that exists
     # in the working tree but is git-ignored (a build product) is not the
     # task's responsibility.
