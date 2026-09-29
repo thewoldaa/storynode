@@ -28,7 +28,10 @@ const char* kGoodReport = R"({
                "width": 1010, "height": 521, "display": "block", "visible": true },
   "footer":  { "top": 558, "bottom": 583, "left": 0, "right": 1010,
                "width": 1010, "height": 25, "display": "flex", "visible": true },
-  "nodes": 0, "ports": 0, "buttons": 5
+  "undo": { "width": 60, "height": 24, "visible": true },
+  "redo": { "width": 60, "height": 24, "visible": true },
+  "undoDisabled": true, "redoDisabled": true,
+  "nodes": 0, "ports": 0, "buttons": 7
 })";
 
 bool Passed(const std::string& text)
@@ -55,7 +58,10 @@ TEST(RejectsAMissingFooter)
       "viewport": { "width": 1010, "height": 583 },
       "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
       "graph":   { "top": 37, "bottom": 583, "width": 1010, "height": 546, "visible": true },
-      "nodes": 0, "ports": 0, "buttons": 5
+  "undo": { "width": 60, "height": 24, "visible": true },
+  "redo": { "width": 60, "height": 24, "visible": true },
+  "undoDisabled": true, "redoDisabled": true,
+  "nodes": 0, "ports": 0, "buttons": 7
     })");
 
     CHECK_FALSE(Passed(report));
@@ -73,7 +79,10 @@ TEST(RejectsAZeroHeightFooter)
       "graph":   { "top": 37, "bottom": 583, "width": 1010, "height": 546, "visible": true },
       "footer":  { "top": 583, "bottom": 583, "width": 1010, "height": 0,
                    "display": "flex", "visible": false },
-      "nodes": 0, "ports": 0, "buttons": 5
+  "undo": { "width": 60, "height": 24, "visible": true },
+  "redo": { "width": 60, "height": 24, "visible": true },
+  "undoDisabled": true, "redoDisabled": true,
+  "nodes": 0, "ports": 0, "buttons": 7
     })");
 
     CHECK_FALSE(Passed(report));
@@ -90,7 +99,10 @@ TEST(RejectsAFooterThatOverlapsTheGraph)
       "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
       "graph":   { "top": 37, "bottom": 583, "width": 1010, "height": 546, "visible": true },
       "footer":  { "top": 400, "bottom": 425, "width": 1010, "height": 25, "visible": true },
-      "nodes": 0, "ports": 0, "buttons": 5
+  "undo": { "width": 60, "height": 24, "visible": true },
+  "redo": { "width": 60, "height": 24, "visible": true },
+  "undoDisabled": true, "redoDisabled": true,
+  "nodes": 0, "ports": 0, "buttons": 7
     })");
 
     CHECK_FALSE(Passed(report));
@@ -105,7 +117,10 @@ TEST(RejectsAGraphThatOverlapsTheToolbar)
       "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
       "graph":   { "top": 10, "bottom": 583, "width": 1010, "height": 573, "visible": true },
       "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
-      "nodes": 0, "ports": 0, "buttons": 5
+  "undo": { "width": 60, "height": 24, "visible": true },
+  "redo": { "width": 60, "height": 24, "visible": true },
+  "undoDisabled": true, "redoDisabled": true,
+  "nodes": 0, "ports": 0, "buttons": 7
     })");
 
     CHECK_FALSE(Passed(report));
@@ -119,7 +134,10 @@ TEST(RejectsAMissingToolbar)
       "viewport": { "width": 1010, "height": 583 },
       "graph":   { "top": 0, "bottom": 583, "width": 1010, "height": 583, "visible": true },
       "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
-      "nodes": 0, "ports": 0, "buttons": 5
+  "undo": { "width": 60, "height": 24, "visible": true },
+  "redo": { "width": 60, "height": 24, "visible": true },
+  "undoDisabled": true, "redoDisabled": true,
+  "nodes": 0, "ports": 0, "buttons": 7
     })");
 
     CHECK_FALSE(Passed(report));
@@ -136,7 +154,10 @@ TEST(RejectsAToolbarWithNoButtons)
       "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
       "graph":   { "top": 37, "bottom": 558, "width": 1010, "height": 521, "visible": true },
       "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
-      "nodes": 0, "ports": 0, "buttons": 0
+  "undo": { "width": 60, "height": 24, "visible": true },
+  "redo": { "width": 60, "height": 24, "visible": true },
+  "undoDisabled": true, "redoDisabled": true,
+  "nodes": 0, "ports": 0, "buttons": 0
     })");
 
     CHECK_FALSE(Passed(report));
@@ -169,8 +190,56 @@ TEST(AcceptsATightButValidLayout)
       "toolbar": { "top": 0, "bottom": 37, "width": 900, "height": 37, "visible": true },
       "graph":   { "top": 36, "bottom": 475, "width": 900, "height": 439, "visible": true },
       "footer":  { "top": 474, "bottom": 499, "width": 900, "height": 25, "visible": true },
-      "nodes": 0, "ports": 0, "buttons": 5
+  "undo": { "width": 60, "height": 24, "visible": true },
+  "redo": { "width": 60, "height": 24, "visible": true },
+  "undoDisabled": true, "redoDisabled": true,
+  "nodes": 0, "ports": 0, "buttons": 7
     })");
 
     CHECK(Passed(report));
+}
+
+// --- the undo and redo controls ---------------------------------------------
+//
+// These exist because a page whose script threw partway through still lays out
+// and still shows a toolbar, so counting buttons is not enough to know that
+// the controls are there and that the host's state reached them.
+
+TEST(RejectsAMissingUndoControl)
+{
+    const std::string report = FormatLayoutReport(R"({
+      "type": "layoutReport",
+      "viewport": { "width": 1010, "height": 583 },
+      "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
+      "graph":   { "top": 37, "bottom": 558, "width": 1010, "height": 521, "visible": true },
+      "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
+      "redo": { "width": 60, "height": 24, "visible": true },
+      "undoDisabled": true, "redoDisabled": true,
+      "nodes": 0, "ports": 0, "buttons": 7
+    })");
+
+    CHECK_FALSE(Passed(report));
+    CHECK(report.find("undo control") != std::string::npos);
+}
+
+TEST(RejectsAnUndoControlThatDidNotReadTheHostState)
+{
+    // The control is there and the layout is right, but it is enabled on a
+    // document with no history. That means the page is deciding for itself
+    // instead of using what the host sent, which is the failure the history
+    // message exists to prevent.
+    const std::string report = FormatLayoutReport(R"({
+      "type": "layoutReport",
+      "viewport": { "width": 1010, "height": 583 },
+      "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
+      "graph":   { "top": 37, "bottom": 558, "width": 1010, "height": 521, "visible": true },
+      "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
+      "undo": { "width": 60, "height": 24, "visible": true },
+      "redo": { "width": 60, "height": 24, "visible": true },
+      "undoDisabled": false, "redoDisabled": true,
+      "nodes": 0, "ports": 0, "buttons": 7
+    })");
+
+    CHECK_FALSE(Passed(report));
+    CHECK(report.find("undo is enabled") != std::string::npos);
 }

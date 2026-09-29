@@ -44,6 +44,12 @@ const wchar_t* LayoutProbeScript()
     graph: box("main.graph"),
     footer: box("footer"),
     panel: box("aside"),
+    undo: box("#undo"),
+    redo: box("#redo"),
+    undoDisabled: !!document.getElementById("undo") &&
+                  document.getElementById("undo").disabled,
+    redoDisabled: !!document.getElementById("redo") &&
+                  document.getElementById("redo").disabled,
     nodes: document.querySelectorAll(".node").length,
     ports: document.querySelectorAll(".port").length,
     buttons: document.querySelectorAll("button").length
@@ -141,9 +147,41 @@ std::string FormatLayoutReport(const std::string& pageReport)
     out << "  ports           " << report["ports"].AsInt() << "\n";
     out << "  buttons         " << report["buttons"].AsInt() << "\n";
 
-    if (report["buttons"].AsInt() < 5)
+    if (report["buttons"].AsInt() < 7)
     {
         out << "  ERROR: the toolbar did not render its buttons\n";
+        ok = false;
+    }
+
+    // The undo and redo controls, and the state the host put them in. A page
+    // whose script threw partway through still lays out and still shows a
+    // toolbar, so the controls are checked by name rather than by counting
+    // buttons alone.
+    const json::Value& undo = report["undo"];
+    if (undo.IsNull() || !undo["visible"].AsBool())
+    {
+        out << "  ERROR: the undo control is missing or collapsed\n";
+        ok = false;
+    }
+
+    const json::Value& redo = report["redo"];
+    if (redo.IsNull() || !redo["visible"].AsBool())
+    {
+        out << "  ERROR: the redo control is missing or collapsed\n";
+        ok = false;
+    }
+
+    // Both start disabled, because a document that has just loaded has nothing
+    // to undo. A page that rendered them enabled is not reading what the host
+    // said, which is the failure the history message exists to prevent.
+    if (!report["undoDisabled"].AsBool())
+    {
+        out << "  ERROR: undo is enabled on a document with no history\n";
+        ok = false;
+    }
+    if (!report["redoDisabled"].AsBool())
+    {
+        out << "  ERROR: redo is enabled on a document with no history\n";
         ok = false;
     }
 

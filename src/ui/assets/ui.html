@@ -22,6 +22,7 @@
        - the message protocol (window.storynode.receive, post)
        - the current document and selection
        - the render loop and the per-frame ordering
+       - the undo and redo keys, which are a binding and not an area's
      An area registers itself and is called; it never reaches into another
      area.
      --------------------------------------------------------------------- -->
@@ -29,6 +30,9 @@
 <body>
 
 <header class="toolbar">
+  <button id="undo" title="Undo the last edit (Ctrl+Z)" disabled>Undo</button>
+  <button id="redo" title="Redo the last undone edit (Ctrl+Y)" disabled>Redo</button>
+  <span class="sep"></span>
   <button id="add-dialog" title="Add a dialogue node">+ Dialogue</button>
   <button id="add-branch" title="Add a branch node">+ Branch</button>
   <button id="add-end" title="Add an end node">+ End</button>
@@ -83,6 +87,16 @@
     document: null,
     selectedId: null,
     problems: [],
+
+    // Whether the host says the document differs from what is on disk. The
+    // page shows it; it never decides it, because only the host can know.
+    dirty: false,
+
+    // What the host says can be undone, and how much. Held here rather than
+    // worked out from what this page sent, because the page is not the only
+    // thing that edits: the host undoes, the stack is trimmed, and a file is
+    // opened. Only the host knows, so it says, and this is what it said.
+    history: { canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 },
 
     // View transform. Presentation only: the host never sees it, and two
     // windows onto the same document may differ.
@@ -157,7 +171,7 @@
   }
 
   /// The parts of the page the shell owns: the title, the counts, the
-  /// problems badge, the error box.
+  /// problems badge, the error box, the undo and redo buttons.
   function renderChrome(current) {
     var doc = current.document;
     var nodes = doc ? (doc.nodes || []).length : 0;
@@ -166,10 +180,35 @@
     document.getElementById("counts").textContent =
       nodes + (nodes === 1 ? " node, " : " nodes, ") +
       edges + (edges === 1 ? " edge" : " edges");
-    document.getElementById("doc-title").textContent =
-      (doc && doc.title) ? doc.title : "Untitled";
 
+    // The asterisk matches the one in the window title, so the two do not
+    // disagree about whether there is unsaved work.
+    var title = (doc && doc.title) ? doc.title : "Untitled";
+    document.getElementById("doc-title").textContent =
+      current.dirty ? title + " *" : title;
+
+    renderHistory(current);
     renderProblems(current);
+  }
+
+  /// Undo and redo, shown as the host says they are.
+  ///
+  /// Disabled rather than hidden: a button that appears and disappears moves
+  /// the ones beside it, and the user aims at where a button was.
+  function renderHistory(current) {
+    var history = current.history;
+
+    var undo = document.getElementById("undo");
+    undo.disabled = !history.canUndo;
+    undo.title = history.canUndo
+      ? "Undo the last edit (Ctrl+Z) — " + history.undoDepth + " available"
+      : "Nothing to undo";
+
+    var redo = document.getElementById("redo");
+    redo.disabled = !history.canRedo;
+    redo.title = history.canRedo
+      ? "Redo the last undone edit (Ctrl+Y) — " + history.redoDepth + " available"
+      : "Nothing to redo";
   }
 
   function renderProblems(current) {
@@ -216,6 +255,7 @@
     switch (message.type) {
       case "document":
         state.document = message.document;
+        state.dirty = message.dirty === true;
         if (state.selectedId && !findNode(state.selectedId)) {
           state.selectedId = null;
         }
@@ -224,6 +264,16 @@
 
       case "validation":
         state.problems = message.problems || [];
+        render();
+        break;
+
+      case "history":
+        state.history = {
+          canUndo: message.canUndo === true,
+          canRedo: message.canRedo === true,
+          undoDepth: message.undoDepth || 0,
+          redoDepth: message.redoDepth || 0
+        };
         render();
         break;
 
@@ -279,6 +329,44 @@
   };
 
   // --- start ---------------------------------------------------------------
+
+  // The keyboard the shell owns.
+  //
+  // Undo and redo are a key binding and not a canvas or inspector concern: the
+  // areas edit nodes and properties, and neither of them owns the document.
+  // The shell does, so the binding lives here and the areas stay independent
+  // of it — and of each other.
+  window.addEventListener("keydown", function (event) {
+    if (!event.ctrlKey && !event.metaKey) { return; }
+
+    // Left to the field while one has focus. Ctrl+Z in a half-typed property
+    // means "take back what I typed", and the inspector has not sent the edit
+    // yet — so undoing the document here would take back the previous edit
+    // instead, which is not what the user asked for and is not what they can
+    // see the effect of.
+    var inField = event.target.tagName === "INPUT" ||
+                  event.target.tagName === "TEXTAREA";
+    if (inField) { return; }
+
+    var key = (event.key || "").toLowerCase();
+
+    // Ctrl+Shift+Z as well as Ctrl+Y. Both are in use in the wild, and a user
+    // who reaches for the other one should not get a beep.
+    if (key === "z" && !event.shiftKey) {
+      post({ type: "undo" });
+      event.preventDefault();
+    } else if (key === "y" || (key === "z" && event.shiftKey)) {
+      post({ type: "redo" });
+      event.preventDefault();
+    }
+  });
+
+  document.getElementById("undo").addEventListener("click", function () {
+    post({ type: "undo" });
+  });
+  document.getElementById("redo").addEventListener("click", function () {
+    post({ type: "redo" });
+  });
 
   // Tell the host we are listening. Nothing the host sends before this arrives
   // is delivered, so this is not optional politeness: without it the page loads
