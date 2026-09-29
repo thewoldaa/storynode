@@ -1,6 +1,7 @@
 #include "core/Model.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <set>
 
 namespace storynode {
@@ -12,6 +13,13 @@ bool IsTerminalType(const std::string& type)
 {
     return type == "end";
 }
+
+/// The largest number `NextId` will treat as a counter.
+///
+/// Far above any id a real document contains, and far below the point where
+/// incrementing it could overflow. An id above this is treated as an opaque
+/// name rather than a counter, which is what it is.
+constexpr std::int64_t kMaxGeneratedIdNumber = 1'000'000'000'000'000LL;
 
 /// Node types that begin a playthrough.
 bool IsStartType(const std::string& type)
@@ -28,7 +36,7 @@ bool IsStartType(const std::string& type)
 std::string NextId(const std::vector<std::string>& taken, const std::string& prefix)
 {
     const std::string head = prefix + "-";
-    int highest = 0;
+    std::int64_t highest = 0;
 
     for (const std::string& id : taken)
     {
@@ -43,18 +51,30 @@ std::string NextId(const std::vector<std::string>& taken, const std::string& pre
         {
             continue;
         }
+
+        // stoll, not stoi, and the result is compared rather than added to.
+        //
+        // With int, an id ending in -2147483647 makes the increment overflow,
+        // which is undefined behaviour. On a wrapping implementation the result
+        // is "-2147483648", whose leading minus the digit filter above rejects,
+        // so the next call recomputes the same value and hands out the same id
+        // twice — a duplicate id in a document that is supposed to be unique.
+        //
+        // A 64-bit counter puts the overflow past any plausible id, and the
+        // clamp below puts it out of reach entirely.
         try
         {
-            const int n = std::stoi(digits);
-            if (n > highest)
+            const std::int64_t n = std::stoll(digits);
+            if (n > highest && n < kMaxGeneratedIdNumber)
             {
                 highest = n;
             }
         }
         catch (...)
         {
-            // An id that overflows an int is not a counter this function
-            // produced, so it is ignored rather than treated as an error.
+            // An id whose number does not fit in 64 bits is not a counter this
+            // function produced, so it is ignored rather than treated as an
+            // error.
         }
     }
 

@@ -1,6 +1,7 @@
 #include "core/ProjectIO.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
@@ -133,6 +134,14 @@ const std::vector<std::string>& EdgeKeys()
 {
     static const std::vector<std::string> keys = {
         "id", "from", "to",
+    };
+    return keys;
+}
+
+const std::vector<std::string>& EndpointKeys()
+{
+    static const std::vector<std::string> keys = {
+        "nodeId", "portId",
     };
     return keys;
 }
@@ -331,6 +340,8 @@ Endpoint ReadEndpoint(const json::Value& source, const std::string& edgeId,
                                  "edge.endpoint.missingNodeId");
     endpoint.portId = ReadString(source, "portId", where, problems, edgeId, true,
                                  "edge.endpoint.missingPortId");
+
+    CollectExtra(source, EndpointKeys(), endpoint.extra);
     return endpoint;
 }
 
@@ -373,6 +384,7 @@ json::Value WriteEndpoint(const Endpoint& endpoint)
     json::Value out(json::Object {});
     out.Set("nodeId", json::Value(endpoint.nodeId));
     out.Set("portId", json::Value(endpoint.portId));
+    ApplyExtra(endpoint.extra, EndpointKeys(), out);
     return out;
 }
 
@@ -496,25 +508,57 @@ LoadResult Deserialize(const std::string& text)
             ReportProblem(result.problems, Severity::Error, "formatVersion.type",
                           "Field \"formatVersion\" must be a number.");
         }
+        else if (!version->IsInteger())
+        {
+            // 1.9 is not version 1. Truncating it would silently accept a file
+            // written by a version this build does not understand, which is
+            // the one thing the version field exists to prevent.
+            ReportProblem(result.problems, Severity::Error, "formatVersion.type",
+                          "Field \"formatVersion\" must be a whole number.");
+        }
         else
         {
-            story.formatVersion = static_cast<int>(version->AsInt());
+            const std::int64_t declared = version->AsInt();
+
+            // Everything is decided in 64 bits, and the narrowing to int
+            // happens once, at the end, only after the value is known to be in
+            // range.
+            //
+            // Narrowing first is how a file declaring 4294967297 becomes 1,
+            // passes the "not newer than this build" check, and is then saved
+            // back as version 1 — a silent downgrade of a file the build
+            // cannot actually read.
+            if (declared < 0)
+            {
+                ReportProblem(result.problems, Severity::Error, "formatVersion.invalid",
+                              "Field \"formatVersion\" must not be negative.");
+            }
+            else if (declared > kFormatVersion)
+            {
+                // Refused here, before anything else is read, so a caller
+                // cannot end up with a story that looks usable.
+                //
+                // The message names the number as it appeared in the file
+                // rather than a truncated version of it, because the number is
+                // the whole point of the message.
+                ReportProblem(result.problems, Severity::Error, "formatVersion.tooNew",
+                              "This file was written by a newer version of the editor "
+                              "(format " + std::to_string(declared) +
+                                  ", this build reads up to " +
+                                  std::to_string(kFormatVersion) +
+                                  "). Opening and saving it here would lose data.");
+                return result;
+            }
+            else
+            {
+                story.formatVersion = static_cast<int>(declared);
+            }
         }
     }
     else
     {
         ReportProblem(result.problems, Severity::Error, "formatVersion.missing",
                       "The file does not declare a format version.");
-    }
-
-    if (story.formatVersion > kFormatVersion)
-    {
-        ReportProblem(result.problems, Severity::Error, "formatVersion.tooNew",
-                      "This file was written by a newer version of the editor "
-                      "(format " + std::to_string(story.formatVersion) +
-                          ", this build reads up to " + std::to_string(kFormatVersion) +
-                          "). Opening and saving it here would lose data.");
-        return result;
     }
 
     story.id = ReadString(root, "id", "The document", result.problems, {}, true);
@@ -683,9 +727,15 @@ std::string SaveToFile(const Story& story, const std::string& path)
 {
     const std::string text = Serialize(story);
 
-    // Write beside the target and rename. A rename within a directory is
-    // atomic on NTFS, so a crash or a full disk leaves the previous file
-    // intact instead of a half-written one where the user's story was.
+    // Write beside the target and rename over it.
+    //
+    // std::filesystem::rename, not std::rename. The C function refuses to
+    // overwrite on Windows, so it has to be preceded by a delete — and that
+    // delete is a window in which the original is gone and the replacement is
+    // not in place yet. If the rename then fails, because a scanner has the
+    // temporary open or the directory is read-only, both files are lost and
+    // the user has nothing. std::filesystem::rename replaces the destination
+    // in one step, which is the property this function's contract claims.
     const std::string temporary = path + ".tmp";
 
     {
@@ -699,16 +749,22 @@ std::string SaveToFile(const Story& story, const std::string& path)
         if (!file)
         {
             file.close();
-            std::remove(temporary.c_str());
+            std::error_code ignored;
+            std::filesystem::remove(temporary, ignored);
             return "Failed while writing \"" + temporary + "\".";
         }
     }
 
-    std::remove(path.c_str());
-    if (std::rename(temporary.c_str(), path.c_str()) != 0)
+    std::error_code error;
+    std::filesystem::rename(temporary, path, error);
+    if (error)
     {
-        std::remove(temporary.c_str());
-        return "Cannot replace \"" + path + "\".";
+        // The original is untouched, which is the point. Clean up the
+        // temporary so a failed save does not leave litter beside the file,
+        // and say what the system said rather than guessing.
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored);
+        return "Cannot replace \"" + path + "\": " + error.message() + ".";
     }
 
     return {};
