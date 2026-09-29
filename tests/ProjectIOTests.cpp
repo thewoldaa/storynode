@@ -575,3 +575,43 @@ TEST(SaveReplacesTheFileWithoutDeletingItFirst)
     std::ifstream temporary(file.Path() + ".tmp");
     CHECK_FALSE(temporary.good());
 }
+
+TEST(SaveOverwritesAFileThatAlreadyExists)
+{
+    // The case that broke the first attempt at a safe save.
+    //
+    // std::rename and std::filesystem::rename both refuse to overwrite on
+    // Windows, failing with "Access is denied" when the destination exists.
+    // The original was then deleted first to work around that, which is a
+    // window where neither file exists. This pins the behaviour that actually
+    // matters: saving over an existing document succeeds and leaves the new
+    // content.
+    const TempFile file("first version");
+
+    const std::string first = SaveToFile(MakeEmptyStory("First"), file.Path());
+    CHECK_EQ(first, std::string(""));
+
+    const std::string second = SaveToFile(MakeEmptyStory("Second"), file.Path());
+    CHECK_EQ(second, std::string(""));
+
+    const LoadResult loaded = LoadFromFile(file.Path());
+    CHECK_EQ(loaded.problems.size(), std::size_t(0));
+    CHECK_EQ(loaded.story.title, std::string("Second"));
+}
+
+TEST(SaveToANewPathWorksWhenTheFileDoesNotExistYet)
+{
+    // ReplaceFileW requires the destination to exist, so the first save takes
+    // a different path through the code. Both must work.
+    const std::string path = "storynode_test_fresh_never_written.snproj";
+    std::remove(path.c_str());
+
+    const std::string error = SaveToFile(MakeEmptyStory("Fresh"), path);
+    CHECK_EQ(error, std::string(""));
+
+    const LoadResult loaded = LoadFromFile(path);
+    CHECK_EQ(loaded.problems.size(), std::size_t(0));
+    CHECK_EQ(loaded.story.title, std::string("Fresh"));
+
+    std::remove(path.c_str());
+}

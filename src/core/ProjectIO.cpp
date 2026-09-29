@@ -5,8 +5,33 @@
 #include <fstream>
 #include <sstream>
 
+#if defined(_WIN32)
+// For ReplaceFileW, which is how a file is replaced in one step on Windows.
+#include <windows.h>
+#endif
+
 namespace storynode {
 namespace {
+
+#if defined(_WIN32)
+/// UTF-8 to UTF-16, for the Win32 calls that take a path.
+///
+/// Only file paths go through this. The document itself is UTF-8 throughout
+/// and never needs converting.
+std::wstring Widen(const std::string& utf8)
+{
+    if (utf8.empty())
+    {
+        return {};
+    }
+    const int needed = MultiByteToWideChar(CP_UTF8, 0, utf8.data(),
+                                           static_cast<int>(utf8.size()), nullptr, 0);
+    std::wstring out(static_cast<std::size_t>(needed), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
+                        out.data(), needed);
+    return out;
+}
+#endif
 
 // --- reading helpers --------------------------------------------------------
 
@@ -727,15 +752,22 @@ std::string SaveToFile(const Story& story, const std::string& path)
 {
     const std::string text = Serialize(story);
 
-    // Write beside the target and rename over it.
+    // Write beside the target, then put it in place.
     //
-    // std::filesystem::rename, not std::rename. The C function refuses to
-    // overwrite on Windows, so it has to be preceded by a delete — and that
-    // delete is a window in which the original is gone and the replacement is
-    // not in place yet. If the rename then fails, because a scanner has the
-    // temporary open or the directory is read-only, both files are lost and
-    // the user has nothing. std::filesystem::rename replaces the destination
-    // in one step, which is the property this function's contract claims.
+    // The naive version of this is a delete followed by a rename, because
+    // std::rename will not overwrite on Windows. That is a window in which the
+    // original is gone and the replacement is not in place: if the rename then
+    // fails — a scanner holding the temporary, a read-only directory — both
+    // files are lost and the user has nothing.
+    //
+    // std::filesystem::rename has the same limitation for the same reason, and
+    // fails with "Access is denied" when the destination exists. So on Windows
+    // this uses ReplaceFileW, which is the API for exactly this: it replaces a
+    // file's contents while preserving its attributes, and it does so in one
+    // step.
+    //
+    // POSIX rename does overwrite, so the portable path is used everywhere
+    // else.
     const std::string temporary = path + ".tmp";
 
     {
@@ -756,7 +788,31 @@ std::string SaveToFile(const Story& story, const std::string& path)
     }
 
     std::error_code error;
+
+#if defined(_WIN32)
+    const std::wstring wideTemporary = Widen(temporary);
+    const std::wstring widePath = Widen(path);
+
+    if (!ReplaceFileW(widePath.c_str(), wideTemporary.c_str(), nullptr,
+                      REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr))
+    {
+        const DWORD code = GetLastError();
+
+        // The target may not exist yet, which is the common case for a first
+        // save. ReplaceFileW requires it to, so fall back to a plain move.
+        if (code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND)
+        {
+            std::filesystem::rename(temporary, path, error);
+        }
+        else
+        {
+            error = std::error_code(static_cast<int>(code), std::system_category());
+        }
+    }
+#else
     std::filesystem::rename(temporary, path, error);
+#endif
+
     if (error)
     {
         // The original is untouched, which is the point. Clean up the
