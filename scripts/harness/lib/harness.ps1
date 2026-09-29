@@ -364,6 +364,58 @@ function Test-HarnessTaskChanges {
     return $true
 }
 
+# --- tool lookup ------------------------------------------------------------
+#
+# PowerShell usually inherits the machine PATH, but a tool installed after the
+# shell started is not visible until it is restarted. Look in the standard
+# install locations before giving up, so a fresh session works rather than
+# failing on a machine where the tool plainly exists.
+
+function Find-HarnessTool {
+    param(
+        [string] $Name,
+        [string[]] $Candidates
+    )
+
+    $command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+
+    foreach ($candidate in $Candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+    }
+
+    return $null
+}
+
+function Get-HarnessCMake {
+    $found = Find-HarnessTool -Name cmake -Candidates @(
+        "$env:ProgramFiles\CMake\bin\cmake.exe",
+        "${env:ProgramFiles(x86)}\CMake\bin\cmake.exe",
+        "$env:LOCALAPPDATA\Programs\CMake\bin\cmake.exe",
+        "$env:ProgramFiles\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe",
+        "$env:ProgramFiles\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe",
+        "$env:ProgramFiles\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+    )
+    if (-not $found) {
+        Write-Error "cmake not found. Install it with: winget install Kitware.CMake"
+        return $null
+    }
+    return $found
+}
+
+function Get-HarnessCTest {
+    $found = Find-HarnessTool -Name ctest -Candidates @(
+        "$env:ProgramFiles\CMake\bin\ctest.exe",
+        "${env:ProgramFiles(x86)}\CMake\bin\ctest.exe",
+        "$env:LOCALAPPDATA\Programs\CMake\bin\ctest.exe"
+    )
+    if (-not $found) {
+        Write-Error "ctest not found. It ships with CMake."
+        return $null
+    }
+    return $found
+}
+
 # --- build and test --------------------------------------------------------
 
 # Configure, build and test inside a worktree.
@@ -374,11 +426,16 @@ function Test-HarnessTaskChanges {
 function Invoke-HarnessBuildAndTest {
     param([string] $Worktree, [string] $Slug)
 
+    $cmake = Get-HarnessCMake
+    if (-not $cmake) { return $false }
+    $ctest = Get-HarnessCTest
+    if (-not $ctest) { return $false }
+
     $buildDir = Join-Path $Worktree "build\$Slug"
     New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
 
     Write-Host "--- configure ($Slug)"
-    & cmake -S $Worktree -B $buildDir -G "Visual Studio 17 2022" -A x64 -DSTORYNODE_BUILD_TESTS=ON *> (Join-Path $buildDir 'configure.log')
+    & $cmake -S $Worktree -B $buildDir -G "Visual Studio 17 2022" -A x64 -DSTORYNODE_BUILD_TESTS=ON *> (Join-Path $buildDir 'configure.log')
     if ($LASTEXITCODE -ne 0) {
         Write-Host "configure failed; see $(Join-Path $buildDir 'configure.log')" -ForegroundColor Red
         Get-Content (Join-Path $buildDir 'configure.log') -Tail 40 | ForEach-Object { Write-Host $_ }
@@ -386,7 +443,7 @@ function Invoke-HarnessBuildAndTest {
     }
 
     Write-Host "--- build ($Slug)"
-    & cmake --build $buildDir --config Debug --parallel *> (Join-Path $buildDir 'build.log')
+    & $cmake --build $buildDir --config Debug --parallel *> (Join-Path $buildDir 'build.log')
     if ($LASTEXITCODE -ne 0) {
         Write-Host "build failed; see $(Join-Path $buildDir 'build.log')" -ForegroundColor Red
         Get-Content (Join-Path $buildDir 'build.log') -Tail 60 | ForEach-Object { Write-Host $_ }
@@ -394,7 +451,7 @@ function Invoke-HarnessBuildAndTest {
     }
 
     Write-Host "--- test ($Slug)"
-    & ctest --test-dir $buildDir -C Debug --output-on-failure *> (Join-Path $buildDir 'test.log')
+    & $ctest --test-dir $buildDir -C Debug --output-on-failure *> (Join-Path $buildDir 'test.log')
     if ($LASTEXITCODE -ne 0) {
         Write-Host "tests failed; see $(Join-Path $buildDir 'test.log')" -ForegroundColor Red
         Get-Content (Join-Path $buildDir 'test.log') -Tail 60 | ForEach-Object { Write-Host $_ }
