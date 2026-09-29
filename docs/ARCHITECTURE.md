@@ -18,7 +18,6 @@ change to the core needs to know about a window, the change belongs in `app/`.
 
 `src/ui/` depends on nothing at all. It is loaded as text into a web view and
 talks to the rest of the program only through messages.
-
 ## The document model
 
 ```
@@ -43,6 +42,50 @@ property schema, and the inspector renders the properties from that schema.
 Adding a node type is adding a declaration, not a class — which is what keeps
 wave 2 parallelisable.
 
+## The document session
+
+```
+DocumentSession
+ ├─ Story            the document itself
+ ├─ History          the undo stack, and the revision it has reached
+ └─ _savedRevision   the revision last written to disk
+```
+
+One object owns the document, the undo stack and the saved-state marker. The
+host holds it; the bridge edits through it; nothing edits the `Story` directly,
+because an edit that bypassed the stack would be one the user cannot take back.
+
+**The marker is a revision number, not a copy of the document.** Every applied
+command takes the document to a new revision, and `IsDirty()` compares that
+with the revision that was last written. A copy would double the memory of the
+largest thing in the process and make "is it dirty" a deep comparison — on
+every frame, if the title bar is drawn from it.
+
+The revision is what makes an undo back to the saved state report clean. A
+flag set on edit and cleared on save cannot express that: undoing to the saved
+state is an edit that un-dirties the document, and only a number that comes
+back to the value it had can say so.
+
+A command is a **value** that can be applied and reverted, not a closure that
+mutates in place. It carries the data needed to take the edit back, captured
+when the edit was requested rather than reconstructed from a document that has
+moved on since. That is what makes undo work after a save and after another
+undo.
+
+Two rules in the stack are easy to get subtly wrong, and are pinned by tests:
+
+- **Coalescing.** Consecutive moves of the same node inside a short window
+  merge into one step, so a drag is one undo rather than one per message. The
+  merged step keeps the *first* command's before-position; merging the other
+  end would leave the node halfway across the canvas after an undo. A save and
+  an undo both end the gesture — a merge across a save would make the single
+  step span it, and the undo would jump past the saved state.
+
+- **The bound.** The stack keeps a fixed number of steps, so a long session is
+  not a slow leak. Trimming can put the saved revision out of reach, and the
+  document is then permanently dirty until it is saved again — which is true,
+  and is why the depths are reported to the page rather than guessed at.
+
 ## The bridge protocol
 
 Every message is a JSON object with a `type` field.
@@ -53,23 +96,39 @@ Every message is a JSON object with a `type` field.
 | --- | --- | --- |
 | `ready` | — | Page script loaded; host may now send state |
 | `moveNode` | `id`, `x`, `y` | User finished dragging a node |
+| `addNode` | `nodeType`, `x`, `y` | Add a node at a position |
+| `removeNode` | `id` | Delete a node and its edges |
 | `selectNode` | `id` or `null` | Selection changed |
 | `setProperty` | `id`, `key`, `value` | Property edited in the inspector |
 | `connect` | `from`, `to` | User drew an edge |
 | `disconnect` | `edgeId` | User removed an edge |
+| `undo` | — | Take the last edit back |
+| `redo` | — | Re-apply the last undone edit |
+| `requestDocument` | — | Send the whole state again |
 
 **Host to page:**
 
 | Type | Payload | Meaning |
 | --- | --- | --- |
-| `document` | full story | Authoritative state after any change |
+| `document` | full story, `dirty` | Authoritative state after any change |
 | `selection` | `id` or `null` | Selection changed by the host |
 | `validation` | `problems[]` | Current validation results |
+| `history` | `canUndo`, `canRedo`, `undoDepth`, `redoDepth` | What the page may offer |
 | `error` | `message` | Something failed; show it |
 
 Messages carry intent, not state. The host applies the intent to the
 document, then broadcasts a fresh snapshot. The page never patches its own
 copy optimistically, so the two sides cannot drift.
+
+**The page is told what it can do rather than deciding for itself.** Whether
+undo is available depends on the stack, which the host owns and which is
+trimmed, saved and undone without the page's involvement. A page that worked
+it out from what it had sent would show an enabled Undo button that does
+nothing the first time the host acted on its own.
+
+`dirty` travels with the document snapshot rather than in a message of its
+own, so the page cannot render a document and a dirty flag that belong to
+different states.
 
 ## Why the model is snapshotted rather than diffed
 
@@ -191,6 +250,12 @@ and any screenshot mechanism. It runs at four window sizes, because a layout
 that happens to be correct at one size is not evidence that it is correct: the
 footer sitting at the bottom of a large window proves nothing about a small
 one.
+
+It also checks the undo and redo controls by name and by state, not only by
+counting the toolbar's buttons. A page whose script threw partway through
+still lays out and still shows a toolbar, so the count alone cannot tell a
+working toolbar from a broken one — and a control that is enabled on a
+document with no history is a page that is not reading what the host sent.
 
 ## Build
 

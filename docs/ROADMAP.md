@@ -45,7 +45,7 @@ Parallel with wave 1. Lands the surface the two tasks below both need.
 
 | Task | Status | Deliverable |
 | --- | --- | --- |
-| `session` | Planned | `DocumentSession`, the undo stack, the undo/redo messages, and the saved-state marker |
+| `session` | **Complete** | `DocumentSession`, the undo stack, the undo/redo messages, and the saved-state marker |
 
 ### Why the original four became two plus two
 
