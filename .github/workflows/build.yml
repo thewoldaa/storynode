@@ -1,0 +1,85 @@
+name: build
+
+# ---------------------------------------------------------------------------
+# Configure, build and test on Windows, plus a formatting pass that runs
+# everywhere and answers while the Windows job is still queueing.
+# ---------------------------------------------------------------------------
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    name: cmake format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install gersemi
+        run: pip install gersemi
+
+      # gersemi reformats CMake. It is given CMakeLists.txt files only:
+      # CMakePresets.json is JSON, and handing it to a CMake parser fails with
+      # "unbalanced parentheses" on the opening brace, which looks like a
+      # formatting problem and is not one.
+      - name: Check formatting
+        run: |
+          gersemi --check \
+            CMakeLists.txt \
+            src/CMakeLists.txt \
+            tests/CMakeLists.txt \
+            tests/VerifyCMakeLists.txt
+
+  build-windows:
+    name: build and test (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache WebView2 SDK
+        uses: actions/cache@v4
+        with:
+          path: third_party
+          # Keyed on the script that pins the version, so bumping the version
+          # in the script invalidates the cache automatically.
+          key: webview2-${{ hashFiles('scripts/fetch-deps.ps1') }}
+
+      - name: Fetch WebView2 SDK
+        shell: pwsh
+        run: ./scripts/fetch-deps.ps1
+
+      - name: Configure
+        shell: pwsh
+        run: cmake --preset ci
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build --preset ci
+
+      # This runs the unit tests and the UI layout checks. The layout checks
+      # launch the built editor, have the page measure itself, and fail if a
+      # band of the interface is missing, collapsed, or overlapping. Without
+      # them, CI would pass on a window that renders nothing.
+      - name: Test
+        shell: pwsh
+        run: ctest --preset ci
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            build/ci/Testing/Temporary/LastTest.log
+            build/ci/tests/layout_*.txt
+          if-no-files-found: ignore

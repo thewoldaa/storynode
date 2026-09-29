@@ -376,6 +376,66 @@ harness_check_task_changes() {
   return 0
 }
 
+# --- tool lookup ------------------------------------------------------------
+#
+# Git Bash does not inherit a PATH entry added to Windows after the shell
+# started, and CMake's installer adds itself to the Windows PATH. So a fresh
+# Git Bash cannot see a cmake that was installed this morning, and the harness
+# fails with "cmake: command not found" on a machine where cmake plainly
+# works.
+#
+# Look in the standard install locations before giving up, rather than
+# requiring every caller to have a correctly inherited PATH.
+
+harness_find_tool() {
+  local name="$1"
+  shift
+
+  if command -v "$name" >/dev/null 2>&1; then
+    command -v "$name"
+    return 0
+  fi
+
+  local candidate
+  for candidate in "$@"; do
+    if [ -x "$candidate" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+harness_cmake() {
+  local found
+  found=$(harness_find_tool cmake \
+    "/c/Program Files/CMake/bin/cmake.exe" \
+    "/c/Program Files (x86)/CMake/bin/cmake.exe" \
+    "$HOME/AppData/Local/Programs/CMake/bin/cmake.exe" \
+    "/c/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe" \
+    "/c/Program Files/Microsoft Visual Studio/2022/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe" \
+    "/c/Program Files/Microsoft Visual Studio/2022/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe") || {
+    echo "error: cmake not found" >&2
+    echo "Install it, or add it to PATH:" >&2
+    echo "    winget install Kitware.CMake" >&2
+    return 1
+  }
+  echo "$found"
+}
+
+harness_ctest() {
+  local found
+  found=$(harness_find_tool ctest \
+    "/c/Program Files/CMake/bin/ctest.exe" \
+    "/c/Program Files (x86)/CMake/bin/ctest.exe" \
+    "$HOME/AppData/Local/Programs/CMake/bin/ctest.exe") || {
+    echo "error: ctest not found. It ships with CMake." >&2
+    return 1
+  }
+  echo "$found"
+}
+
 # --- build and test --------------------------------------------------------
 
 # Configure, build and test inside a worktree.
@@ -386,23 +446,27 @@ harness_check_task_changes() {
 harness_build_and_test() {
   local worktree="$1" slug="$2"
 
+  local cmake_bin ctest_bin
+  cmake_bin=$(harness_cmake) || return 1
+  ctest_bin=$(harness_ctest) || return 1
+
   local build_dir="$worktree/build/$slug"
   mkdir -p "$build_dir"
 
   echo "--- configure ($slug)"
-  cmake -S "$worktree" -B "$build_dir" \
+  "$cmake_bin" -S "$worktree" -B "$build_dir" \
         -G "Visual Studio 17 2022" -A x64 \
         -DSTORYNODE_BUILD_TESTS=ON \
         > "$build_dir/configure.log" 2>&1 \
     || { echo "configure failed; see $build_dir/configure.log" >&2; tail -40 "$build_dir/configure.log" >&2; return 1; }
 
   echo "--- build ($slug)"
-  cmake --build "$build_dir" --config Debug --parallel \
+  "$cmake_bin" --build "$build_dir" --config Debug --parallel \
         > "$build_dir/build.log" 2>&1 \
     || { echo "build failed; see $build_dir/build.log" >&2; tail -60 "$build_dir/build.log" >&2; return 1; }
 
   echo "--- test ($slug)"
-  ctest --test-dir "$build_dir" -C Debug --output-on-failure \
+  "$ctest_bin" --test-dir "$build_dir" -C Debug --output-on-failure \
         > "$build_dir/test.log" 2>&1 \
     || { echo "tests failed; see $build_dir/test.log" >&2; tail -60 "$build_dir/test.log" >&2; return 1; }
 

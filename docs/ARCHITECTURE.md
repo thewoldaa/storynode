@@ -91,7 +91,44 @@ Two kinds, deliberately separated:
   not errors — an unfinished story is a valid document, just not a valid
   export.
 
-Both produce the same `Problem` shape so the UI has one way to display them.
+Both produce the same `Problem` shape so the UI has one way to display them,
+and the bridge sends both kinds in one message. Two channels would mean two
+places to look for the same question.
+
+## Unknown keys survive a round trip
+
+Every level of the document — the story, each node, each port, each edge —
+carries an `extra` object holding the keys that level's reader did not
+recognise. Saving writes them back.
+
+Without this, opening a file written by a newer build and saving it silently
+deletes whatever that build added. That is the worst failure this format can
+have: it destroys data without telling anyone, and it only shows up when the
+user goes back to the newer version and finds their work gone.
+
+The cost is that each reader has a list of the keys it knows about, and that
+list has to be edited alongside the reader. A key added to the reader but
+forgotten in the list would be written twice, once from the struct and once
+from `extra` — which is why the parser rejects duplicate keys rather than
+silently taking the last one.
+
+## Verification
+
+The interface is verified by having the page measure itself and report back
+through the same bridge the editor uses. `storynode --verify` loads the page,
+runs a script that reports the geometry of each band of the interface, and
+exits non-zero if a band is missing, collapsed, or overlapping its neighbour.
+
+This exists because a WebView2 host that fails to navigate, fails to create
+the controller, or loads a page whose script throws will still show a window
+and still stay running. Without a check, CI passes on a blank white rectangle.
+
+The measurements come from `getBoundingClientRect` in the page's own
+coordinate space, so the check is independent of window size, display scaling
+and any screenshot mechanism. It runs at four window sizes, because a layout
+that happens to be correct at one size is not evidence that it is correct: the
+footer sitting at the bottom of a large window proves nothing about a small
+one.
 
 ## Build
 
@@ -100,3 +137,8 @@ explicit list is deliberate: with one worktree per task, an explicit source
 list is a shared file every task must edit, which makes every task conflict
 with every other task. Adding a source file inside a task's own territory must
 not require touching a shared file.
+
+WebView2 is optional. When the SDK is absent the core library, the bridge and
+the tests still configure and build, so a contributor without it can work on
+the model and the format — and the model tests run on a Linux CI runner, where
+feedback is faster and the runner is cheaper.
