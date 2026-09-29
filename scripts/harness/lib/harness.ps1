@@ -313,7 +313,27 @@ function Test-HarnessPathAlwaysAllowed {
     param([string] $Path)
 
     $p = $Path -replace '\\', '/'
-    return $p.StartsWith('tests/', [System.StringComparison]::Ordinal)
+
+    # The test for all of these is the same: does an unnoticed overlap here
+    # produce silently wrong work, or a noisy conflict?
+    #
+    # tests/ -- every task that adds behaviour adds a test for it, so the test
+    # tree is a consequence of doing the work rather than a place to work.
+    if ($p.StartsWith('tests/', [System.StringComparison]::Ordinal)) { return $true }
+
+    # docs/ and CHANGELOG.md -- every task documents what it did, and both are
+    # append-only in practice. Two tasks adding a section at the same place
+    # produce a conflict git refuses to merge and a person resolves, so nothing
+    # is silently wrong.
+    #
+    # That is not the same as "these files are not important". src/ui/assets/**
+    # and src/app/** stay claimed because an unnoticed overlap there produces
+    # code that merges cleanly and is broken. A noisy conflict is safe; a
+    # silent one is not.
+    if ($p.StartsWith('docs/', [System.StringComparison]::Ordinal)) { return $true }
+    if ($p -eq 'CHANGELOG.md') { return $true }
+
+    return $false
 }
 
 # Check that every file a task has touched falls inside its territory.

@@ -325,26 +325,35 @@ harness_path_in_territory() {
 
 # Is this path always allowed, whatever a task declares?
 #
-# Two categories, for different reasons.
+# Three categories, and the test for all of them is the same: does an
+# unnoticed overlap here produce silently wrong work, or a noisy conflict?
 #
 # `tests/` — every task that adds behaviour adds a test for it, and a task that
 # adds behaviour without a test is the thing the tests exist to prevent. So the
 # test tree is not a territory to be claimed; it is a consequence of doing the
 # work. Requiring each declaration to list it produces a rule that is either
 # restated in every file or broken by every file, and a rule that is always
-# broken stops being read. It has been widened after the fact twice already,
-# which is the signal that the rule itself was wrong.
+# broken stops being read. It was widened after the fact twice before this was
+# written down, which is the signal that the rule itself was wrong.
+#
+# `docs/` and `CHANGELOG.md` — every task documents what it did, and both are
+# append-only in practice: a task adds a section, it does not rewrite one.
+# Two tasks adding a section at the same place produce a textual conflict that
+# git refuses to merge and a person resolves. Nothing is silently wrong.
+#
+# That is the distinction that matters, and it is not the same as "these files
+# are not important". `src/ui/assets/**` and `src/app/**` stay claimed because
+# an unnoticed overlap there produces code that merges cleanly and is broken:
+# two tasks editing one stylesheet, or one window procedure, with no conflict
+# to notice. A noisy conflict is safe; a silent one is not.
 #
 # A task's own declaration — see the note in harness_check_task_changes.
-#
-# Note what is NOT here. `src/ui/assets/**` and `src/app/**` are not, because
-# two tasks writing the same stylesheet or the same window code is exactly the
-# conflict this check exists to catch. A shared surface stays a shared surface;
-# only the test tree is a consequence of the work rather than a place to work.
 harness_path_always_allowed() {
   local path="$1"
   case "$path" in
     tests/*) return 0 ;;
+    docs/*) return 0 ;;
+    CHANGELOG.md) return 0 ;;
   esac
   return 1
 }

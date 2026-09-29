@@ -72,25 +72,32 @@ The rules that make parallel work safe:
    files and CMake caches separate so parallel builds never touch the same
    file.
 
-### Two paths no task has to declare
+### Paths no task has to declare
+
+Three, and the test for all of them is the same: **does an unnoticed overlap
+here produce silently wrong work, or a noisy conflict?**
 
 **`tests/`** — every task that adds behaviour adds a test for it, and a task
 that adds behaviour without a test is the thing the tests exist to prevent. So
 the test tree is not a territory to be claimed; it is a consequence of doing
-the work.
+the work. Requiring each declaration to list it produces a rule that is either
+restated in every file or broken by every file, and a rule that is always
+broken stops being read.
 
-Requiring each declaration to list it produces a rule that is either restated
-in every file or broken by every file, and a rule that is always broken stops
-being read. It was widened after the fact twice before this was written down,
-which is the signal that the rule itself was wrong.
+**`docs/` and `CHANGELOG.md`** — every task documents what it did, and both
+are append-only in practice: a task adds a section, it does not rewrite one.
+Two tasks adding a section at the same place produce a textual conflict that
+git refuses to merge and a person resolves. Nothing is silently wrong.
 
 **A task's own declaration** — `tasks/wave-N/task.md`. Requiring a task to list
 its declaration inside its declaration is a circle.
 
-Note what is *not* exempt. `src/ui/assets/**` and `src/app/**` stay claimed,
-because two tasks writing the same stylesheet or the same window code is
-exactly the conflict the check exists to catch. Only the test tree is a
-consequence of the work rather than a place to work.
+Note what is *not* exempt. `src/ui/assets/**`, `src/app/**` and `src/core/**`
+stay claimed, because an unnoticed overlap there produces code that merges
+cleanly and is broken: two tasks editing one stylesheet, or one window
+procedure, with no conflict to notice. **A noisy conflict is safe; a silent one
+is not.** That is the whole rule, and it is why documentation is exempt and
+code is not.
 
 ## Commits
 
