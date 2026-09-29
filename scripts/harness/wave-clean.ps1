@@ -63,19 +63,28 @@ if ($LASTEXITCODE -eq 0) {
 # Otherwise ask GitHub. A squash merge rewrites the commits, so the ancestry
 # test above fails even though the work is merged and the branch is safe to
 # delete.
+#
+# The question is "is there a MERGED pull request for this branch", not "what
+# is the state of the first pull request". Those differ as soon as a branch has
+# two: a failed attempt leaves a closed or open one behind, and taking the
+# first would then report the branch as unmerged forever, refusing a cleanup
+# that is entirely safe.
 if (-not $merged) {
     $gh = Get-Command gh -ErrorAction SilentlyContinue
     if ($gh) {
-        $state = (& gh pr list --head $branch --state all --json state --jq '.[0].state') 2>$null
-        if ($state -eq 'MERGED') {
+        $states = (& gh pr list --head $branch --state all --json state --jq '.[].state') 2>$null
+
+        if ($states -contains 'MERGED') {
             $merged = $true
-        } elseif ($state) {
+        } elseif ($states) {
             Write-Error @"
-pull request for '$branch' is $state, not merged
+no pull request for '$branch' has been merged
+
+  pull requests found for this branch: $($states -join ', ')
 
 Cleaning up now would delete commits that exist nowhere else.
-Merge or close the pull request first:
-  gh pr view --head $branch --web
+Merge one of them first:
+  gh pr list --head $branch --state all
 "@
             exit 1
         }

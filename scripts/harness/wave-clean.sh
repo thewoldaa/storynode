@@ -82,18 +82,32 @@ fi
 # Otherwise ask GitHub. A squash merge rewrites the commits, so the ancestry
 # test above fails even though the work is merged and the branch is safe to
 # delete.
+#
+# The question is "is there a MERGED pull request for this branch", not "what
+# is the state of the first pull request". Those differ as soon as a branch has
+# two: a failed attempt leaves a closed or open one behind, and taking the
+# first would then report the branch as unmerged forever, refusing a cleanup
+# that is entirely safe.
 if [ "$merged" -eq 0 ] && command -v gh >/dev/null 2>&1; then
-  state=$(gh pr list --head "$branch" --state all --json state --jq '.[0].state' 2>/dev/null || true)
-  if [ "$state" = "MERGED" ]; then
-    merged=1
-  elif [ -n "$state" ]; then
-    echo "error: pull request for '$branch' is $state, not merged" >&2
-    echo "" >&2
-    echo "Cleaning up now would delete commits that exist nowhere else." >&2
-    echo "Merge or close the pull request first:" >&2
-    echo "  gh pr view --head $branch --web" >&2
-    exit 1
-  fi
+  states=$(gh pr list --head "$branch" --state all --json state --jq '.[].state' 2>/dev/null || true)
+
+  case "$states" in
+    *MERGED*)
+      merged=1
+      ;;
+    *)
+      if [ -n "$states" ]; then
+        echo "error: no pull request for '$branch' has been merged" >&2
+        echo "" >&2
+        echo "  pull requests found for this branch: $states" >&2
+        echo "" >&2
+        echo "Cleaning up now would delete commits that exist nowhere else." >&2
+        echo "Merge one of them first:" >&2
+        echo "  gh pr list --head $branch --state all" >&2
+        exit 1
+      fi
+      ;;
+  esac
 fi
 
 if [ "$merged" -eq 0 ]; then
