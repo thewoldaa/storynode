@@ -31,7 +31,10 @@ const char* kGoodReport = R"({
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
   "undoDisabled": true, "redoDisabled": true, "areas": 2,
-  "nodes": 0, "ports": 0, "buttons": 7
+  "nodes": 0, "ports": 0, "buttons": 7,
+  "seam": { "shellSelected": ["a", "b"], "shellAnchor": "a",
+             "drawnSelected": 2, "panelOpen": true, "inspectorFields": 3,
+             "showsDifference": true }
 })";
 
 bool Passed(const std::string& text)
@@ -61,7 +64,10 @@ TEST(RejectsAMissingFooter)
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
   "undoDisabled": true, "redoDisabled": true, "areas": 2,
-  "nodes": 0, "ports": 0, "buttons": 7
+  "nodes": 0, "ports": 0, "buttons": 7,
+  "seam": { "shellSelected": ["a", "b"], "shellAnchor": "a",
+             "drawnSelected": 2, "panelOpen": true, "inspectorFields": 3,
+             "showsDifference": true }
     })");
 
     CHECK_FALSE(Passed(report));
@@ -102,7 +108,10 @@ TEST(RejectsAFooterThatOverlapsTheGraph)
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
   "undoDisabled": true, "redoDisabled": true, "areas": 2,
-  "nodes": 0, "ports": 0, "buttons": 7
+  "nodes": 0, "ports": 0, "buttons": 7,
+  "seam": { "shellSelected": ["a", "b"], "shellAnchor": "a",
+             "drawnSelected": 2, "panelOpen": true, "inspectorFields": 3,
+             "showsDifference": true }
     })");
 
     CHECK_FALSE(Passed(report));
@@ -193,7 +202,10 @@ TEST(AcceptsATightButValidLayout)
   "undo": { "width": 60, "height": 24, "visible": true },
   "redo": { "width": 60, "height": 24, "visible": true },
   "undoDisabled": true, "redoDisabled": true, "areas": 2,
-  "nodes": 0, "ports": 0, "buttons": 7
+  "nodes": 0, "ports": 0, "buttons": 7,
+  "seam": { "shellSelected": ["a", "b"], "shellAnchor": "a",
+             "drawnSelected": 2, "panelOpen": true, "inspectorFields": 3,
+             "showsDifference": true }
     })");
 
     CHECK(Passed(report));
@@ -284,4 +296,87 @@ TEST(RejectsAReportThatCouldNotCountTheAreas)
     })");
 
     CHECK_FALSE(Passed(report));
+}
+
+// --- the seam between the two interface areas -------------------------------
+//
+// The checks above prove the shell laid out and the areas loaded. Neither
+// catches two areas that load and then disagree, which is the failure mode
+// parallel work produces: the canvas selecting two nodes while the inspector
+// shows one.
+//
+// This is the check that would have caught it, so the cases that matter are
+// the ones where the two areas report different things.
+
+TEST(RejectsAReportWithNoSeam)
+{
+    // A page that never ran the selection check. Treating silence as success
+    // is how a check stops being one.
+    const std::string report = FormatLayoutReport(R"({
+      "type": "layoutReport",
+      "viewport": { "width": 1010, "height": 583 },
+      "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
+      "graph":   { "top": 37, "bottom": 558, "width": 1010, "height": 521, "visible": true },
+      "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
+      "areas": 2, "nodes": 0, "ports": 0, "buttons": 7
+    })");
+
+    CHECK_FALSE(Passed(report));
+    CHECK(report.find("did not run the selection check") != std::string::npos);
+}
+
+TEST(RejectsACanvasThatSelectsFewerThanTheShell)
+{
+    // The exact defect: the canvas keeps its own set and publishes an anchor,
+    // so the shell sees one node and the inspector edits one. Everything
+    // loads, nothing throws, and the two areas disagree.
+    const std::string report = FormatLayoutReport(R"({
+      "type": "layoutReport",
+      "viewport": { "width": 1010, "height": 583 },
+      "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
+      "graph":   { "top": 37, "bottom": 558, "width": 1010, "height": 521, "visible": true },
+      "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
+      "areas": 2, "nodes": 3, "ports": 5, "buttons": 7,
+      "seam": { "shellSelected": ["a"], "shellAnchor": "a",
+                "drawnSelected": 1, "panelOpen": true, "inspectorFields": 3,
+                "showsDifference": false }
+    })");
+
+    CHECK_FALSE(Passed(report));
+    CHECK(report.find("left 1 in the shell") != std::string::npos);
+    CHECK(report.find("did not report differing values") != std::string::npos);
+}
+
+TEST(RejectsAnInspectorThatShowsNothingForASelection)
+{
+    const std::string report = FormatLayoutReport(R"({
+      "type": "layoutReport",
+      "viewport": { "width": 1010, "height": 583 },
+      "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
+      "graph":   { "top": 37, "bottom": 558, "width": 1010, "height": 521, "visible": true },
+      "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
+      "areas": 2, "nodes": 3, "ports": 5, "buttons": 7,
+      "seam": { "shellSelected": ["a", "b"], "shellAnchor": "a",
+                "drawnSelected": 2, "panelOpen": true, "inspectorFields": 0,
+                "showsDifference": false }
+    })");
+
+    CHECK_FALSE(Passed(report));
+    CHECK(report.find("showed nothing") != std::string::npos);
+}
+
+TEST(RejectsAPageWhereTheSelectionCheckThrew)
+{
+    const std::string report = FormatLayoutReport(R"({
+      "type": "layoutReport",
+      "viewport": { "width": 1010, "height": 583 },
+      "toolbar": { "top": 0, "bottom": 37, "width": 1010, "height": 37, "visible": true },
+      "graph":   { "top": 37, "bottom": 558, "width": 1010, "height": 521, "visible": true },
+      "footer":  { "top": 558, "bottom": 583, "width": 1010, "height": 25, "visible": true },
+      "areas": 2, "nodes": 3, "ports": 5, "buttons": 7,
+      "seam": { "error": "shell.selectMany is not a function" }
+    })");
+
+    CHECK_FALSE(Passed(report));
+    CHECK(report.find("selectMany is not a function") != std::string::npos);
 }

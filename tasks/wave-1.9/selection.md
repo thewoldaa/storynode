@@ -45,9 +45,22 @@ it**, and state read by two areas is shared state, not one area's presentation.
 - src/ui/assets/canvas/**
 - src/ui/assets/inspector/**
 - src/ui/assets/styles/**
+- src/app/LayoutReport.cpp
 - tests/**
 - docs/**
 - CHANGELOG.md
+
+### Why the verify probe is in scope
+
+`src/app/LayoutReport.cpp` holds the script the page runs to measure itself
+and the formatter that judges the result. The whole point of this task is the
+check that would have caught the gap, and that check lives there: it installs a
+document, selects two nodes through the canvas, and reads what the inspector
+shows.
+
+Changing the page's behaviour without changing the thing that checks it would
+leave the check asserting the old contract. That is the same failure in a
+different place.
 
 ## Deliverables
 

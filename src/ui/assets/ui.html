@@ -85,7 +85,22 @@
 
   var state = {
     document: null,
+
+    // The selection is a set, and the shell owns it.
+    //
+    // Two areas read it: the canvas draws the selected nodes, and the
+    // inspector edits them. State read by two areas is shared state, so it
+    // belongs here rather than in whichever area happens to produce it. An
+    // area that kept its own set would leave the other one showing something
+    // stale, and the disagreement would only appear once both were written.
+    //
+    // `selectedIds` is the whole selection, in document order. `selectedId` is
+    // the anchor: the one node the inspector focuses and a keyboard step moves
+    // from. They answer different questions and neither is a special case of
+    // the other -- a selection of four still has one anchor.
+    selectedIds: [],
     selectedId: null,
+
     problems: [],
 
     // Whether the host says the document differs from what is on disk. The
@@ -235,18 +250,80 @@
 
   /// Change the selection and tell everything that cares.
   ///
-  /// The one place selection changes. An area that set `selectedId` directly
-  /// would leave the other areas showing stale content, which is a bug that
-  /// only shows up once there are two areas.
-  function select(id) {
-    if (state.selectedId === id) { return; }
-    state.selectedId = id;
+  /// The one place the selection changes. An area that assigned the state
+  /// directly would leave the other area showing stale content, which is a bug
+  /// that only appears once there are two areas — and by then both are written
+  /// and neither is obviously at fault.
+  ///
+  /// `ids` is the whole selection; `anchor` is the one node to focus, and
+  /// defaults to the first. A selection of several still has exactly one
+  /// anchor, so passing it is not the same as passing several ids.
+  function selectMany(ids, anchor) {
+    var next = normaliseSelection(ids);
+    var nextAnchor = anchor && next.indexOf(anchor) >= 0
+      ? anchor
+      : (next.length ? next[0] : null);
+
+    if (sameSelection(state.selectedIds, next) && state.selectedId === nextAnchor) {
+      return;
+    }
+
+    state.selectedIds = next;
+    state.selectedId = nextAnchor;
+
     for (var i = 0; i < areas.length; i++) {
       if (areas[i].onSelectionChanged) {
         areas[i].onSelectionChanged(state);
       }
     }
     render();
+  }
+
+  /// Select one node, or clear the selection with null.
+  ///
+  /// Kept as its own call because most of the interface selects one thing, and
+  /// writing `selectMany([id])` at every one of those call sites would obscure
+  /// the cases that really do select several.
+  function select(id) {
+    selectMany(id ? [id] : [], id);
+  }
+
+  /// Drop duplicates, drop ids that are not in the document, and order the
+  /// result the way the document orders it.
+  ///
+  /// Document order rather than click order, so that the inspector's field
+  /// order does not depend on which node the user happened to click first.
+  /// Dropping unknown ids matters after a document message: a node can be
+  /// deleted while selected, and a selection naming it would make the
+  /// inspector show a node that is no longer there.
+  function normaliseSelection(ids) {
+    if (!ids || !ids.length) { return []; }
+
+    var wanted = {};
+    for (var i = 0; i < ids.length; i++) {
+      if (ids[i]) { wanted[ids[i]] = true; }
+    }
+
+    var ordered = [];
+    var nodes = (state.document && state.document.nodes) || [];
+    for (var j = 0; j < nodes.length; j++) {
+      if (wanted[nodes[j].id]) {
+        ordered.push(nodes[j].id);
+        delete wanted[nodes[j].id];
+      }
+    }
+
+    // Anything still wanted is not in the document. It is dropped rather than
+    // kept, so that a stale id cannot survive a document message.
+    return ordered;
+  }
+
+  function sameSelection(a, b) {
+    if (a.length !== b.length) { return false; }
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) { return false; }
+    }
+    return true;
   }
 
   // --- the message protocol ------------------------------------------------
@@ -256,9 +333,11 @@
       case "document":
         state.document = message.document;
         state.dirty = message.dirty === true;
-        if (state.selectedId && !findNode(state.selectedId)) {
-          state.selectedId = null;
-        }
+        // A node can be deleted while it is selected. Pruning here rather than
+        // trusting the ids to still resolve keeps the selection honest, and
+        // this is the one moment the document is known to have changed
+        // underneath. selectMany drops ids the document no longer has.
+        selectMany(state.selectedIds, state.selectedId);
         render();
         break;
 
@@ -332,6 +411,7 @@
 
     post: post,
     select: select,
+    selectMany: selectMany,
     findNode: findNode,
     findPort: findPort,
     escapeHtml: escapeHtml,
