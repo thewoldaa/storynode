@@ -28,10 +28,10 @@
 #include "app/UiAssets.h"
 #include "app/Verify.h"
 #include "core/ProjectIO.h"
+#include "core/session/DocumentSession.h"
 #include "resource.h"
 
 using namespace Microsoft::WRL;
-using storynode::Story;
 
 namespace {
 
@@ -41,7 +41,12 @@ const wchar_t* kWindowTitle = L"StoryNode";
 HWND g_window = nullptr;
 HMENU g_menu = nullptr;
 
-Story g_document;
+/// The open document, its history and its saved-state marker.
+///
+/// One object rather than a Story beside a bool. The bool could not answer
+/// "is this the same as what is on disk" after an undo, and the host needs
+/// that answer for the title bar, the save prompt and the undo menu item.
+storynode::DocumentSession g_session;
 std::unique_ptr<storynode::Bridge> g_bridge;
 
 ComPtr<ICoreWebView2Controller> g_controller;
@@ -49,9 +54,6 @@ ComPtr<ICoreWebView2> g_webview;
 
 /// The file the document was loaded from, or empty for a new document.
 std::wstring g_path;
-
-/// True when there are changes that are not on disk.
-bool g_dirty = false;
 
 /// True once the page has sent its ready message. Nothing is sent to the page
 /// before this, because ExecuteScript during navigation is dropped silently.
@@ -203,24 +205,49 @@ void UpdateTitle()
     std::wstring title = kWindowTitle;
     title += L" - ";
     title += g_path.empty() ? L"Untitled" : PathFindFileNameW(g_path.c_str());
-    if (g_dirty)
+    if (g_session.IsDirty())
     {
         title += L" *";
     }
     SetWindowTextW(g_window, title.c_str());
 }
 
-void NewDocument()
+/// Bring the menu's edit items in step with what the session can do.
+///
+/// The menu is a second place the same question is asked, and a menu item
+/// that is enabled when there is nothing to undo is a command that silently
+/// does nothing.
+void UpdateEditMenu()
 {
-    g_document = storynode::MakeEmptyStory("Untitled");
-    g_path.clear();
-    g_dirty = false;
-    UpdateTitle();
+    if (!g_menu)
+    {
+        return;
+    }
+    EnableMenuItem(g_menu, ID_EDIT_UNDO,
+                   MF_BYCOMMAND | (g_session.CanUndo() ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(g_menu, ID_EDIT_REDO,
+                   MF_BYCOMMAND | (g_session.CanRedo() ? MF_ENABLED : MF_GRAYED));
+}
+
+/// Tell the page the document, the problems and what it can undo.
+///
+/// One call rather than three at every site, so a site that forgets one cannot
+/// leave the page showing an Undo button for an edit the host has no step for.
+void PushStateToPage()
+{
     if (g_bridge)
     {
-        g_bridge->SendDocument();
-        g_bridge->SendValidation();
+        g_bridge->SendAll();
     }
+}
+
+void NewDocument()
+{
+    g_session.Reset(storynode::MakeEmptyStory("Untitled"));
+    g_path.clear();
+    UpdateTitle();
+    UpdateEditMenu();
+    PushStateToPage();
 }
 
 /// Ask about unsaved changes. Returns false when the user cancels.
@@ -230,7 +257,7 @@ void NewDocument()
 /// command they just asked for".
 bool ConfirmDiscard()
 {
-    if (!g_dirty)
+    if (!g_session.IsDirty())
     {
         return true;
     }
@@ -291,16 +318,11 @@ bool OpenDocument()
         return false;
     }
 
-    g_document = result.story;
+    g_session.Reset(result.story);
     g_path = path;
-    g_dirty = false;
     UpdateTitle();
-
-    if (g_bridge)
-    {
-        g_bridge->SendDocument();
-        g_bridge->SendValidation();
-    }
+    UpdateEditMenu();
+    PushStateToPage();
 
     // Warnings do not stop the file from opening, but they are worth saying
     // out loud rather than leaving for the user to find.
@@ -347,7 +369,7 @@ bool SaveDocument(bool forcePrompt)
         target = path;
     }
 
-    const std::string error = storynode::SaveToFile(g_document, Narrow(target));
+    const std::string error = storynode::SaveToFile(g_session.Document(), Narrow(target));
     if (!error.empty())
     {
         MessageBoxW(g_window, Widen("Could not save:\n\n" + error).c_str(),
@@ -356,9 +378,31 @@ bool SaveDocument(bool forcePrompt)
     }
 
     g_path = target;
-    g_dirty = false;
+
+    // Told after the write, not before. Marking saved first would leave the
+    // document claiming to be clean when the file had failed to reach disk.
+    g_session.MarkSaved();
     UpdateTitle();
+    UpdateEditMenu();
+    PushStateToPage();
     return true;
+}
+
+/// Undo or redo, then bring the window and the page up to date.
+void ApplyHistoryCommand(bool undo)
+{
+    if (undo)
+    {
+        g_session.Undo();
+    }
+    else
+    {
+        g_session.Redo();
+    }
+
+    UpdateTitle();
+    UpdateEditMenu();
+    PushStateToPage();
 }
 
 void ShowAbout()
@@ -478,8 +522,14 @@ void CreateWebView(HWND window)
 
                                                 if (changed)
                                                 {
-                                                    g_dirty = true;
+                                                    // The dirty flag is the
+                                                    // session's, not a bool
+                                                    // beside it, so an undo back
+                                                    // to the saved state clears
+                                                    // it without anyone having
+                                                    // to remember to.
                                                     UpdateTitle();
+                                                    UpdateEditMenu();
                                                 }
                                             }
                                             CoTaskMemFree(raw);
@@ -542,6 +592,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
 
         case ID_FILE_SAVE_AS:
             SaveDocument(true);
+            return 0;
+
+        case ID_EDIT_UNDO:
+            ApplyHistoryCommand(true);
+            return 0;
+
+        case ID_EDIT_REDO:
+            ApplyHistoryCommand(false);
             return 0;
 
         case ID_FILE_EXIT:
@@ -613,6 +671,14 @@ HMENU BuildMenu()
     AppendMenuW(view, MF_STRING, ID_VIEW_VALIDATE, L"&Re-check Story");
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(view), L"&View");
 
+    // Edit sits between File and View, where every Windows application puts
+    // it. The items are enabled by UpdateEditMenu, which is the only place
+    // that decides.
+    HMENU edit = CreatePopupMenu();
+    AppendMenuW(edit, MF_STRING, ID_EDIT_UNDO, L"&Undo\tCtrl+Z");
+    AppendMenuW(edit, MF_STRING, ID_EDIT_REDO, L"&Redo\tCtrl+Y");
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(edit), L"&Edit");
+
     HMENU help = CreatePopupMenu();
     AppendMenuW(help, MF_STRING, ID_HELP_ABOUT, L"&About");
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(help), L"&Help");
@@ -629,6 +695,11 @@ HACCEL BuildAccelerators()
         { FVIRTKEY | FCONTROL, 'O', ID_FILE_OPEN },
         { FVIRTKEY | FCONTROL, 'S', ID_FILE_SAVE },
         { FVIRTKEY | FCONTROL | FSHIFT, 'S', ID_FILE_SAVE_AS },
+        // Ctrl+Shift+Z as well as Ctrl+Y. Both are in use in the wild and a
+        // user who reaches for the other one should not get a beep.
+        { FVIRTKEY | FCONTROL, 'Z', ID_EDIT_UNDO },
+        { FVIRTKEY | FCONTROL, 'Y', ID_EDIT_REDO },
+        { FVIRTKEY | FCONTROL | FSHIFT, 'Z', ID_EDIT_REDO },
     };
     return CreateAcceleratorTableW(entries, static_cast<int>(std::size(entries)));
 }
@@ -689,9 +760,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         return 1;
     }
 
-    g_document = storynode::MakeEmptyStory("Untitled");
-    g_bridge.reset(new storynode::Bridge(g_document, SendToPage));
+    g_session.Reset(storynode::MakeEmptyStory("Untitled"));
+    g_bridge.reset(new storynode::Bridge(g_session, SendToPage));
     UpdateTitle();
+    UpdateEditMenu();
 
     ShowWindow(g_window, showCommand);
     UpdateWindow(g_window);

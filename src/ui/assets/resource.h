@@ -19,3 +19,5 @@
 #define ID_FILE_EXIT      40005
 #define ID_HELP_ABOUT     40006
 #define ID_VIEW_VALIDATE  40007
+#define ID_EDIT_UNDO      40008
+#define ID_EDIT_REDO      40009

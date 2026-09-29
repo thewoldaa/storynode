@@ -69,13 +69,17 @@ public:
     bool CanUndo() const { return _history.CanUndo(); }
     bool CanRedo() const { return _history.CanRedo(); }
 
-    /// Take the last command back. Does nothing when there is nothing to undo,
-    /// or when the command can no longer be taken back.
-    void Undo();
+    /// Take the last command back.
+    ///
+    /// Returns false when there is nothing to undo, or when the command can no
+    /// longer be taken back. The caller needs the difference between "undone"
+    /// and "nothing happened", because the second must not be reported to the
+    /// host as a change.
+    bool Undo();
 
-    /// Re-apply the last undone command. Does nothing when there is nothing to
-    /// redo.
-    void Redo();
+    /// Re-apply the last undone command. Returns false on the same terms as
+    /// Undo.
+    bool Redo();
 
     /// True when the document differs from the last saved state.
     bool IsDirty() const { return _history.Revision() != _savedRevision; }

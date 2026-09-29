@@ -27,14 +27,14 @@ void DocumentSession::ApplyAt(Command command, HistoryClock::time_point now)
     _history.Apply(_document, std::move(command), now);
 }
 
-void DocumentSession::Undo()
+bool DocumentSession::Undo()
 {
-    _history.Undo(_document);
+    return _history.Undo(_document);
 }
 
-void DocumentSession::Redo()
+bool DocumentSession::Redo()
 {
-    _history.Redo(_document);
+    return _history.Redo(_document);
 }
 
 void DocumentSession::MarkSaved()

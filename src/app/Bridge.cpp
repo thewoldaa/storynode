@@ -28,8 +28,8 @@ json::Value MakeMessage(const std::string& type)
 
 } // namespace
 
-Bridge::Bridge(Story& document, Sender sender)
-    : _document(document), _sender(std::move(sender))
+Bridge::Bridge(DocumentSession& session, Sender sender)
+    : _session(session), _sender(std::move(sender))
 {
 }
 
@@ -54,7 +54,14 @@ void Bridge::SendDocument()
     json::Value message = MakeMessage("document");
     // The document is sent as its serialised form, parsed by the page. That
     // keeps one serialiser authoritative rather than two that can disagree.
-    message.Set("document", json::Parse(Serialize(_document)).value);
+    message.Set("document", json::Parse(Serialize(_session.Document())).value);
+
+    // Dirty travels with the document rather than in a message of its own.
+    // The title bar and the save prompt both read it, and a page that had to
+    // assemble it from a separate message could render a snapshot and a dirty
+    // flag that belong to different states.
+    message.Set("dirty", json::Value(_session.IsDirty()));
+
     Send(message.Serialize());
 }
 
@@ -71,8 +78,8 @@ void Bridge::SendValidation()
     // say the document is broken; graph problems say the story is unfinished.
     // The interface shows them together because a user fixing a story cares
     // about both, and two channels would mean two places to look.
-    std::vector<Problem> problems = Validate(_document);
-    for (Problem& problem : ValidateGraph(_document))
+    std::vector<Problem> problems = Validate(_session.Document());
+    for (Problem& problem : ValidateGraph(_session.Document()))
     {
         problems.push_back(std::move(problem));
     }
@@ -91,6 +98,31 @@ void Bridge::SendValidation()
     message.Set("problems", std::move(list));
 
     Send(message.Serialize());
+}
+
+void Bridge::SendHistory()
+{
+    if (!_pageReady)
+    {
+        return;
+    }
+
+    // Depths, not just two booleans. The page shows how many steps are
+    // available, and a count it derived from its own messages would be wrong
+    // the moment the stack was trimmed or the host undid something itself.
+    json::Value message = MakeMessage("history");
+    message.Set("canUndo", json::Value(_session.CanUndo()));
+    message.Set("canRedo", json::Value(_session.CanRedo()));
+    message.Set("undoDepth", json::Value(static_cast<std::int64_t>(_session.UndoDepth())));
+    message.Set("redoDepth", json::Value(static_cast<std::int64_t>(_session.RedoDepth())));
+    Send(message.Serialize());
+}
+
+void Bridge::SendAll()
+{
+    SendDocument();
+    SendValidation();
+    SendHistory();
 }
 
 void Bridge::SendError(const std::string& text)
@@ -140,6 +172,8 @@ bool Bridge::Dispatch(const std::string& type, const json::Value& message)
     if (type == "setProperty")         { HandleSetProperty(message); return _changed; }
     if (type == "connect")             { HandleConnect(message); return _changed; }
     if (type == "disconnect")          { HandleDisconnect(message); return _changed; }
+    if (type == "undo")                { HandleUndo(); return _changed; }
+    if (type == "redo")                { HandleRedo(); return _changed; }
     if (type == "requestDocument")     { HandleRequestDocument(); return false; }
 
     // An unknown type is reported rather than ignored. A page and a host that
@@ -152,14 +186,12 @@ bool Bridge::Dispatch(const std::string& type, const json::Value& message)
 void Bridge::HandleReady()
 {
     _pageReady = true;
-    SendDocument();
-    SendValidation();
+    SendAll();
 }
 
 void Bridge::HandleRequestDocument()
 {
-    SendDocument();
-    SendValidation();
+    SendAll();
 }
 
 void Bridge::HandleReplaceDocument(const json::Value& message)
@@ -196,28 +228,36 @@ void Bridge::HandleReplaceDocument(const json::Value& message)
         return;
     }
 
-    _document = loaded.story;
+    // A replacement is not an edit and must not be undoable. Undoing it would
+    // restore the previous document's commands to a stack that no longer has
+    // the document they were built against — which is why Reset clears the
+    // history rather than recording the swap as a step.
+    _session.Reset(loaded.story);
     _changed = true;
 
-    SendDocument();
-    SendValidation();
+    SendAll();
 }
 
 void Bridge::HandleMoveNode(const json::Value& message)
 {
     const std::string id = StringField(message, "id");
-    Node* node = _document.FindNode(id);
+    const Node* node = _session.Document().FindNode(id);
     if (!node)
     {
         SendError("Cannot move node \"" + id + "\": no such node.");
         return;
     }
 
-    node->position.x = NumberField(message, "x", node->position.x);
-    node->position.y = NumberField(message, "y", node->position.y);
+    const Vec2 from = node->position;
+    const Vec2 to { NumberField(message, "x", from.x), NumberField(message, "y", from.y) };
+
+    // Built from the document's current position rather than from what the
+    // page sent. The page could be a message behind, and recording its idea of
+    // "before" would make the undo land somewhere the node never was.
+    _session.Apply(Command::MakeMoveNode(id, from, to));
     _changed = true;
 
-    SendDocument();
+    SendAll();
 }
 
 void Bridge::HandleAddNode(const json::Value& message)
@@ -230,7 +270,7 @@ void Bridge::HandleAddNode(const json::Value& message)
     }
 
     Node node;
-    node.id = MakeUniqueId(_document, type);
+    node.id = MakeUniqueId(_session.Document(), type);
     node.type = type;
     node.position.x = NumberField(message, "x", 0.0);
     node.position.y = NumberField(message, "y", 0.0);
@@ -241,43 +281,21 @@ void Bridge::HandleAddNode(const json::Value& message)
     node.ports.push_back(Port { "in", "In", Port::Kind::Input, Port::DataType::Flow, false });
     node.ports.push_back(Port { "out", "Out", Port::Kind::Output, Port::DataType::Flow, false });
 
-    _document.nodes.push_back(std::move(node));
+    _session.Apply(Command::MakeAddNode(std::move(node)));
     _changed = true;
 
-    SendDocument();
-    SendValidation();
+    SendAll();
 }
 
 void Bridge::HandleRemoveNode(const json::Value& message)
 {
     const std::string id = StringField(message, "id");
 
-    std::size_t removedEdges = 0;
-    for (auto it = _document.edges.begin(); it != _document.edges.end();)
-    {
-        if (it->from.nodeId == id || it->to.nodeId == id)
-        {
-            it = _document.edges.erase(it);
-            removedEdges += 1;
-        }
-        else
-        {
-            ++it;
-        }
-    }
-
-    bool removedNode = false;
-    for (auto it = _document.nodes.begin(); it != _document.nodes.end(); ++it)
-    {
-        if (it->id == id)
-        {
-            _document.nodes.erase(it);
-            removedNode = true;
-            break;
-        }
-    }
-
-    if (!removedNode)
+    // The command captures the node, its index and every edge attached to it,
+    // because after the removal the document no longer knows any of them and
+    // an undo has nothing to restore from.
+    const Command command = Command::MakeRemoveNode(_session.Document(), id);
+    if (command.kind == Command::Kind::None)
     {
         SendError("Cannot remove node \"" + id + "\": no such node.");
         return;
@@ -285,11 +303,10 @@ void Bridge::HandleRemoveNode(const json::Value& message)
 
     // Edges go with the node. Leaving them would produce a document that
     // fails validation the instant it is touched.
-    (void)removedEdges;
+    _session.Apply(command);
     _changed = true;
 
-    SendDocument();
-    SendValidation();
+    SendAll();
 }
 
 void Bridge::HandleSetProperty(const json::Value& message)
@@ -297,8 +314,7 @@ void Bridge::HandleSetProperty(const json::Value& message)
     const std::string id = StringField(message, "id");
     const std::string key = StringField(message, "key");
 
-    Node* node = _document.FindNode(id);
-    if (!node)
+    if (!_session.Document().FindNode(id))
     {
         SendError("Cannot set a property on node \"" + id + "\": no such node.");
         return;
@@ -316,11 +332,10 @@ void Bridge::HandleSetProperty(const json::Value& message)
         return;
     }
 
-    node->data.Set(key, *value);
+    _session.Apply(Command::MakeSetProperty(_session.Document(), id, key, *value));
     _changed = true;
 
-    SendDocument();
-    SendValidation();
+    SendAll();
 }
 
 void Bridge::HandleConnect(const json::Value& message)
@@ -330,8 +345,8 @@ void Bridge::HandleConnect(const json::Value& message)
     const std::string toNode = StringField(message, "toNode");
     const std::string toPort = StringField(message, "toPort");
 
-    const Port* from = _document.FindPort(fromNode, fromPort);
-    const Port* to = _document.FindPort(toNode, toPort);
+    const Port* from = _session.Document().FindPort(fromNode, fromPort);
+    const Port* to = _session.Document().FindPort(toNode, toPort);
 
     if (!from || !to)
     {
@@ -345,33 +360,58 @@ void Bridge::HandleConnect(const json::Value& message)
     }
 
     Edge edge;
-    edge.id = MakeUniqueId(_document, "edge");
+    edge.id = MakeUniqueId(_session.Document(), "edge");
     edge.from = Endpoint { fromNode, fromPort };
     edge.to = Endpoint { toNode, toPort };
-    _document.edges.push_back(std::move(edge));
+
+    _session.Apply(Command::MakeConnect(std::move(edge)));
     _changed = true;
 
-    SendDocument();
-    SendValidation();
+    SendAll();
 }
 
 void Bridge::HandleDisconnect(const json::Value& message)
 {
     const std::string id = StringField(message, "id");
 
-    for (auto it = _document.edges.begin(); it != _document.edges.end(); ++it)
+    const Command command = Command::MakeDisconnect(_session.Document(), id);
+    if (command.kind == Command::Kind::None)
     {
-        if (it->id == id)
-        {
-            _document.edges.erase(it);
-            _changed = true;
-            SendDocument();
-            SendValidation();
-            return;
-        }
+        SendError("Cannot remove edge \"" + id + "\": no such edge.");
+        return;
     }
 
-    SendError("Cannot remove edge \"" + id + "\": no such edge.");
+    _session.Apply(command);
+    _changed = true;
+
+    SendAll();
+}
+
+void Bridge::HandleUndo()
+{
+    if (!_session.Undo())
+    {
+        // Not an error. A key repeat on Ctrl+Z, or a second press after the
+        // stack ran out, is ordinary; the page is told the new depths and
+        // stops offering the command.
+        SendHistory();
+        return;
+    }
+
+    _changed = true;
+    SendAll();
+}
+
+void Bridge::HandleRedo()
+{
+    if (!_session.Redo())
+    {
+        SendHistory();
+        return;
+    }
+
+    _changed = true;
+    SendAll();
 }
 
 } // namespace storynode
