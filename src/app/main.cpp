@@ -25,6 +25,7 @@
 
 #include "app/Bridge.h"
 #include "app/LayoutReport.h"
+#include "app/UiAssets.h"
 #include "app/Verify.h"
 #include "core/ProjectIO.h"
 #include "resource.h"
@@ -185,31 +186,15 @@ void RequestLayoutReport()
     g_webview->ExecuteScript(storynode::LayoutProbeScript(), nullptr);
 }
 
-// --- the interface resource -------------------------------------------------
-
-std::wstring LoadInterfaceHtml()
-{
-    HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(IDR_UI_HTML), RT_RCDATA);
-    if (!resource)
-    {
-        return L"<h3>Interface resource missing</h3>";
-    }
-
-    HGLOBAL block = LoadResource(nullptr, resource);
-    if (!block)
-    {
-        return L"<h3>Interface resource could not be loaded</h3>";
-    }
-
-    const DWORD size = SizeofResource(nullptr, resource);
-    const char* data = static_cast<const char*>(LockResource(block));
-    if (!data || size == 0)
-    {
-        return L"<h3>Interface resource is empty</h3>";
-    }
-
-    return Widen(std::string(data, size));
-}
+// --- the interface ----------------------------------------------------------
+//
+// The interface is split across files so parallel tasks never edit the same
+// one, and the page cannot load them itself: NavigateToString gives it an
+// opaque origin. So the build embeds each asset as a resource and
+// UiAssets::BuildInterfaceDocument assembles them into one page here.
+//
+// See src/app/UiAssets.cpp for why, and cmake/GenerateUiResources.cmake for
+// how the asset list is produced without a shared file listing them.
 
 // --- document lifecycle -----------------------------------------------------
 
@@ -502,7 +487,8 @@ void CreateWebView(HWND window)
                                         return S_OK;
                                     }).Get(), &token);
 
-                            g_webview->NavigateToString(LoadInterfaceHtml().c_str());
+                            g_webview->NavigateToString(
+                                storynode::ui::BuildInterfaceDocument().c_str());
                             return S_OK;
                         }).Get());
                 return S_OK;

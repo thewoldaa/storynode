@@ -1,0 +1,85 @@
+/* ---------------------------------------------------------------------------
+   The inspector: the side panel.
+
+   Only what the panel needs. Colours and typography come from
+   styles/theme.css, which the shell loads first; `.problem` and `.hint` are
+   defined there because more than one area shows them.
+   --------------------------------------------------------------------------- */
+
+aside {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 300px;
+  background: var(--panel);
+  border-left: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+
+  /* Off screen until something is selected. Translated rather than hidden, so
+     the transition has something to animate and the panel keeps its layout. */
+  transform: translateX(100%);
+  transition: transform 140ms ease;
+}
+
+aside.open { transform: none; }
+
+aside h2 {
+  margin: 0;
+  padding: 8px var(--pad);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border-bottom: 1px solid var(--rule);
+}
+
+/* A heading inside the scrolling body, as opposed to the panel's own title. */
+aside h2.section {
+  margin: 14px 0 8px;
+  padding: 0;
+  border: 0;
+}
+
+.inspector-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--pad);
+}
+
+/* --- fields --------------------------------------------------------------- */
+
+.field { margin-bottom: 10px; }
+
+.field label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 3px;
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 4px 7px;
+  resize: vertical;
+}
+
+.field input:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.field input:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}

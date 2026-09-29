@@ -431,3 +431,46 @@ TEST(GraphAcceptsAnEmptyStory)
     const std::vector<Problem> problems = ValidateGraph(story);
     CHECK_EQ(problems.size(), std::size_t(0));
 }
+
+// --- defects found by review ------------------------------------------------
+
+TEST(MakeUniqueIdSurvivesAnIdNearTheIntegerLimit)
+{
+    // An id ending in a number near the limit of what the counter can hold
+    // must not overflow, and must not hand out an id that already exists. A
+    // duplicate id makes the document invalid the moment it is saved.
+    Story story = MakeEmptyStory("Test");
+    Node huge;
+    huge.id = "node-2147483647";
+    huge.type = "dialog";
+    story.nodes.push_back(huge);
+
+    const std::string generated = MakeUniqueId(story, "node");
+    CHECK_FALSE(generated == std::string("node-2147483647"));
+    CHECK_FALSE(generated == std::string("node--2147483648"));
+
+    // The generated id must actually be unique, which is the property that
+    // matters. Checking the string is a proxy for it.
+    CHECK(story.FindNode(generated) == nullptr);
+}
+
+TEST(GeneratesDistinctIdsAfterAnExtremeOne)
+{
+    Story story = MakeEmptyStory("Test");
+    Node huge;
+    huge.id = "node-9223372036854775806";
+    huge.type = "dialog";
+    story.nodes.push_back(huge);
+
+    const std::string first = MakeUniqueId(story, "node");
+
+    // Add it and ask again. Two calls must not produce the same answer, or the
+    // second node silently collides with the first.
+    Node added;
+    added.id = first;
+    added.type = "dialog";
+    story.nodes.push_back(added);
+
+    const std::string second = MakeUniqueId(story, "node");
+    CHECK_FALSE(first == second);
+}

@@ -1,11 +1,37 @@
 #include "core/ProjectIO.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
+#if defined(_WIN32)
+// For ReplaceFileW, which is how a file is replaced in one step on Windows.
+#include <windows.h>
+#endif
+
 namespace storynode {
 namespace {
+
+#if defined(_WIN32)
+/// UTF-8 to UTF-16, for the Win32 calls that take a path.
+///
+/// Only file paths go through this. The document itself is UTF-8 throughout
+/// and never needs converting.
+std::wstring Widen(const std::string& utf8)
+{
+    if (utf8.empty())
+    {
+        return {};
+    }
+    const int needed = MultiByteToWideChar(CP_UTF8, 0, utf8.data(),
+                                           static_cast<int>(utf8.size()), nullptr, 0);
+    std::wstring out(static_cast<std::size_t>(needed), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
+                        out.data(), needed);
+    return out;
+}
+#endif
 
 // --- reading helpers --------------------------------------------------------
 
@@ -133,6 +159,14 @@ const std::vector<std::string>& EdgeKeys()
 {
     static const std::vector<std::string> keys = {
         "id", "from", "to",
+    };
+    return keys;
+}
+
+const std::vector<std::string>& EndpointKeys()
+{
+    static const std::vector<std::string> keys = {
+        "nodeId", "portId",
     };
     return keys;
 }
@@ -331,6 +365,8 @@ Endpoint ReadEndpoint(const json::Value& source, const std::string& edgeId,
                                  "edge.endpoint.missingNodeId");
     endpoint.portId = ReadString(source, "portId", where, problems, edgeId, true,
                                  "edge.endpoint.missingPortId");
+
+    CollectExtra(source, EndpointKeys(), endpoint.extra);
     return endpoint;
 }
 
@@ -373,6 +409,7 @@ json::Value WriteEndpoint(const Endpoint& endpoint)
     json::Value out(json::Object {});
     out.Set("nodeId", json::Value(endpoint.nodeId));
     out.Set("portId", json::Value(endpoint.portId));
+    ApplyExtra(endpoint.extra, EndpointKeys(), out);
     return out;
 }
 
@@ -496,25 +533,57 @@ LoadResult Deserialize(const std::string& text)
             ReportProblem(result.problems, Severity::Error, "formatVersion.type",
                           "Field \"formatVersion\" must be a number.");
         }
+        else if (!version->IsInteger())
+        {
+            // 1.9 is not version 1. Truncating it would silently accept a file
+            // written by a version this build does not understand, which is
+            // the one thing the version field exists to prevent.
+            ReportProblem(result.problems, Severity::Error, "formatVersion.type",
+                          "Field \"formatVersion\" must be a whole number.");
+        }
         else
         {
-            story.formatVersion = static_cast<int>(version->AsInt());
+            const std::int64_t declared = version->AsInt();
+
+            // Everything is decided in 64 bits, and the narrowing to int
+            // happens once, at the end, only after the value is known to be in
+            // range.
+            //
+            // Narrowing first is how a file declaring 4294967297 becomes 1,
+            // passes the "not newer than this build" check, and is then saved
+            // back as version 1 — a silent downgrade of a file the build
+            // cannot actually read.
+            if (declared < 0)
+            {
+                ReportProblem(result.problems, Severity::Error, "formatVersion.invalid",
+                              "Field \"formatVersion\" must not be negative.");
+            }
+            else if (declared > kFormatVersion)
+            {
+                // Refused here, before anything else is read, so a caller
+                // cannot end up with a story that looks usable.
+                //
+                // The message names the number as it appeared in the file
+                // rather than a truncated version of it, because the number is
+                // the whole point of the message.
+                ReportProblem(result.problems, Severity::Error, "formatVersion.tooNew",
+                              "This file was written by a newer version of the editor "
+                              "(format " + std::to_string(declared) +
+                                  ", this build reads up to " +
+                                  std::to_string(kFormatVersion) +
+                                  "). Opening and saving it here would lose data.");
+                return result;
+            }
+            else
+            {
+                story.formatVersion = static_cast<int>(declared);
+            }
         }
     }
     else
     {
         ReportProblem(result.problems, Severity::Error, "formatVersion.missing",
                       "The file does not declare a format version.");
-    }
-
-    if (story.formatVersion > kFormatVersion)
-    {
-        ReportProblem(result.problems, Severity::Error, "formatVersion.tooNew",
-                      "This file was written by a newer version of the editor "
-                      "(format " + std::to_string(story.formatVersion) +
-                          ", this build reads up to " + std::to_string(kFormatVersion) +
-                          "). Opening and saving it here would lose data.");
-        return result;
     }
 
     story.id = ReadString(root, "id", "The document", result.problems, {}, true);
@@ -683,9 +752,22 @@ std::string SaveToFile(const Story& story, const std::string& path)
 {
     const std::string text = Serialize(story);
 
-    // Write beside the target and rename. A rename within a directory is
-    // atomic on NTFS, so a crash or a full disk leaves the previous file
-    // intact instead of a half-written one where the user's story was.
+    // Write beside the target, then put it in place.
+    //
+    // The naive version of this is a delete followed by a rename, because
+    // std::rename will not overwrite on Windows. That is a window in which the
+    // original is gone and the replacement is not in place: if the rename then
+    // fails — a scanner holding the temporary, a read-only directory — both
+    // files are lost and the user has nothing.
+    //
+    // std::filesystem::rename has the same limitation for the same reason, and
+    // fails with "Access is denied" when the destination exists. So on Windows
+    // this uses ReplaceFileW, which is the API for exactly this: it replaces a
+    // file's contents while preserving its attributes, and it does so in one
+    // step.
+    //
+    // POSIX rename does overwrite, so the portable path is used everywhere
+    // else.
     const std::string temporary = path + ".tmp";
 
     {
@@ -699,16 +781,46 @@ std::string SaveToFile(const Story& story, const std::string& path)
         if (!file)
         {
             file.close();
-            std::remove(temporary.c_str());
+            std::error_code ignored;
+            std::filesystem::remove(temporary, ignored);
             return "Failed while writing \"" + temporary + "\".";
         }
     }
 
-    std::remove(path.c_str());
-    if (std::rename(temporary.c_str(), path.c_str()) != 0)
+    std::error_code error;
+
+#if defined(_WIN32)
+    const std::wstring wideTemporary = Widen(temporary);
+    const std::wstring widePath = Widen(path);
+
+    if (!ReplaceFileW(widePath.c_str(), wideTemporary.c_str(), nullptr,
+                      REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr))
     {
-        std::remove(temporary.c_str());
-        return "Cannot replace \"" + path + "\".";
+        const DWORD code = GetLastError();
+
+        // The target may not exist yet, which is the common case for a first
+        // save. ReplaceFileW requires it to, so fall back to a plain move.
+        if (code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND)
+        {
+            std::filesystem::rename(temporary, path, error);
+        }
+        else
+        {
+            error = std::error_code(static_cast<int>(code), std::system_category());
+        }
+    }
+#else
+    std::filesystem::rename(temporary, path, error);
+#endif
+
+    if (error)
+    {
+        // The original is untouched, which is the point. Clean up the
+        // temporary so a failed save does not leave litter beside the file,
+        // and say what the system said rather than guessing.
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored);
+        return "Cannot replace \"" + path + "\": " + error.message() + ".";
     }
 
     return {};

@@ -80,15 +80,32 @@ std::string FormatDouble(double d)
         return "0";
     }
 
-    // Integers written as doubles keep a trailing .0 so the type survives
-    // the round trip and a reader can tell 1.0 from 1.
-    if (d == static_cast<double>(static_cast<std::int64_t>(d)) &&
-        std::abs(d) < 9.0e15)
+    // The range test comes first, and it is not an optimisation.
+    //
+    // Converting a double outside int64's range is undefined behaviour, so the
+    // cast below must not happen until the value is known to be in range. The
+    // obvious spelling —
+    //
+    //     if (d == static_cast<int64_t>(d) && std::abs(d) < 9.0e15)
+    //
+    // performs the cast before the guard that was meant to protect it, which
+    // is the wrong way round.
+    //
+    // The bound is 9e15 rather than 2^53 because a double above 2^53 cannot
+    // represent every integer, so "is this integral" stops being a meaningful
+    // question before the cast stops being defined.
+    if (std::abs(d) < 9.0e15)
     {
-        std::ostringstream os;
-        os.precision(1);
-        os << std::fixed << d;
-        return os.str();
+        const std::int64_t truncated = static_cast<std::int64_t>(d);
+        if (d == static_cast<double>(truncated))
+        {
+            // Integers written as doubles keep a trailing .0 so the type
+            // survives the round trip and a reader can tell 1.0 from 1.
+            std::ostringstream os;
+            os.precision(1);
+            os << std::fixed << d;
+            return os.str();
+        }
     }
 
     char buf[40];
@@ -699,9 +716,17 @@ std::int64_t Value::AsInt(std::int64_t fallback) const
     {
         return _integer;
     }
+
     // A number written as 3.0 read as an int is 3. Truncation toward zero is
-    // what a reader expects here, and a validator rejects genuinely
-    // fractional values where an integer is required.
+    // what a reader expects here, and a validator rejects genuinely fractional
+    // values where an integer is required.
+    //
+    // The range test comes first: converting a double outside int64's range is
+    // undefined behaviour, and a document can contain any number at all.
+    if (std::isnan(_number) || std::isinf(_number) || std::abs(_number) >= 9.0e15)
+    {
+        return fallback;
+    }
     return static_cast<std::int64_t>(_number);
 }
 

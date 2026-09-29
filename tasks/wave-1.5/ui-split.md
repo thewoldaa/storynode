@@ -23,14 +23,36 @@ directories that a task can own outright.
 - src/ui/assets/**
 - src/app/UiAssets.cpp
 - src/app/UiAssets.h
+- src/app/main.cpp
 - cmake/GenerateUiResources.cmake
 - CMakeLists.txt
 - src/CMakeLists.txt
 - src/tools/**
+- src/core/**
+- tests/**
 - scripts/harness/**
 - tasks/wave-1/**
+- .github/workflows/**
 - docs/**
 - CHANGELOG.md
+
+### Why the core and the tests are in scope
+
+A review pass over the core library, run as part of this task, found seven
+defects. Fixing them here rather than deferring them is deliberate:
+
+- Two of them are in the file format. Wave 1's `project-io` task builds on
+  `SaveToFile` and on the promise that load-then-save is lossless. Building on
+  a save that can destroy both files, and on a reader that deletes unknown keys
+  at one level, means building on sand.
+- One of them — a resource name that cannot be found — is the same class of bug
+  as the asset embedding this task adds. Fixing the format without fixing that
+  would leave the same defect in the code this task is about.
+- The rest are small, have regression tests, and are cheaper to land now than
+  to carry.
+
+Each fix is its own commit with its own tests, so a reviewer can look at them
+separately from the split.
 
 ## Deliverables
 

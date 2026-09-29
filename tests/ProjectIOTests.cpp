@@ -464,3 +464,154 @@ TEST(SaveReplacesAnExistingFile)
     CHECK_EQ(loaded.problems.size(), std::size_t(0));
     CHECK_EQ(loaded.story.title, std::string("Replaced"));
 }
+
+// --- defects found by review ------------------------------------------------
+//
+// Each of these pins a bug that was found by reading the code rather than by
+// running it. They exist so the bug cannot come back, and so the reasoning
+// survives the fix.
+
+TEST(RejectsANonIntegerFormatVersion)
+{
+    // 1.9 is not version 1. Truncating it would accept a file whose shape
+    // this build does not understand, which is what the version field exists
+    // to prevent.
+    const LoadResult result = Deserialize(
+        R"({"formatVersion":1.9,"id":"s","title":"T","nodes":[],"edges":[]})");
+
+    CHECK(HasCode(result.problems, "formatVersion.type"));
+}
+
+TEST(RejectsAHugeFormatVersionRatherThanTruncatingIt)
+{
+    // 4294967297 truncates to 1 in a 32-bit int, which would pass the
+    // "not newer than this build" check and then be saved back as version 1 —
+    // a silent downgrade of a file this build cannot actually read.
+    const LoadResult result = Deserialize(
+        R"({"formatVersion":4294967297,"id":"s","title":"T","nodes":[],"edges":[]})");
+
+    CHECK(HasCode(result.problems, "formatVersion.tooNew"));
+    // And nothing was populated, so a caller cannot mistake it for usable.
+    CHECK_EQ(result.story.title, std::string(""));
+}
+
+TEST(RejectsANegativeFormatVersion)
+{
+    const LoadResult result = Deserialize(
+        R"({"formatVersion":-1,"id":"s","title":"T","nodes":[],"edges":[]})");
+
+    CHECK(result.HasErrors());
+}
+
+TEST(PreservesUnknownKeysInsideAnEndpoint)
+{
+    // An endpoint is a level of the document like any other. A key added there
+    // by a newer build — a condition, a delay — must survive a save, or the
+    // first save from this build silently deletes it.
+    const LoadResult loaded = Deserialize(R"({
+      "formatVersion": 1,
+      "id": "s",
+      "nodes": [
+        { "id": "a", "type": "start", "ports": [ { "id": "out", "kind": "output" } ] },
+        { "id": "b", "type": "end",   "ports": [ { "id": "in",  "kind": "input"  } ] }
+      ],
+      "edges": [ { "id": "e",
+                   "from": { "nodeId": "a", "portId": "out", "condition": "gold > 3" },
+                   "to":   { "nodeId": "b", "portId": "in" } } ]
+    })");
+
+    CHECK_EQ(loaded.problems.size(), std::size_t(0));
+
+    const std::string text = Serialize(loaded.story);
+    CHECK(text.find("condition") != std::string::npos);
+    CHECK(text.find("gold > 3") != std::string::npos);
+
+    const LoadResult again = Deserialize(text);
+    CHECK_EQ(again.story.edges[0].from.extra["condition"].AsString(),
+             std::string("gold > 3"));
+}
+
+TEST(SurvivesAHugeNumberInTheDocument)
+{
+    // A double outside int64's range must not be cast to an integer. The
+    // conversion is undefined behaviour, and a document can contain any number
+    // at all.
+    const LoadResult loaded = Deserialize(R"({
+      "formatVersion": 1,
+      "id": "s",
+      "nodes": [ { "id": "a", "type": "dialog",
+                   "position": { "x": 1e300, "y": -1e300 },
+                   "ports": [] } ],
+      "edges": []
+    })");
+
+    CHECK_EQ(loaded.problems.size(), std::size_t(0));
+    CHECK(loaded.story.nodes[0].position.x > 1e299);
+
+    // And writing it back must not crash or produce something that will not
+    // parse.
+    const std::string text = Serialize(loaded.story);
+    const LoadResult again = Deserialize(text);
+    CHECK_EQ(again.problems.size(), std::size_t(0));
+    CHECK_EQ(again.story.nodes[0].position.x, loaded.story.nodes[0].position.x);
+}
+
+TEST(SaveReplacesTheFileWithoutDeletingItFirst)
+{
+    // The original must survive a failed save. If the file is replaced by a
+    // delete followed by a rename, a failure between the two leaves nothing,
+    // and a failure of the rename leaves nothing as well.
+    const TempFile file("original contents");
+
+    const std::string error = SaveToFile(MakeEmptyStory("Replaced"), file.Path());
+    CHECK_EQ(error, std::string(""));
+
+    // The new content is there.
+    const LoadResult loaded = LoadFromFile(file.Path());
+    CHECK_EQ(loaded.problems.size(), std::size_t(0));
+    CHECK_EQ(loaded.story.title, std::string("Replaced"));
+
+    // And no temporary is left behind.
+    std::ifstream temporary(file.Path() + ".tmp");
+    CHECK_FALSE(temporary.good());
+}
+
+TEST(SaveOverwritesAFileThatAlreadyExists)
+{
+    // The case that broke the first attempt at a safe save.
+    //
+    // std::rename and std::filesystem::rename both refuse to overwrite on
+    // Windows, failing with "Access is denied" when the destination exists.
+    // The original was then deleted first to work around that, which is a
+    // window where neither file exists. This pins the behaviour that actually
+    // matters: saving over an existing document succeeds and leaves the new
+    // content.
+    const TempFile file("first version");
+
+    const std::string first = SaveToFile(MakeEmptyStory("First"), file.Path());
+    CHECK_EQ(first, std::string(""));
+
+    const std::string second = SaveToFile(MakeEmptyStory("Second"), file.Path());
+    CHECK_EQ(second, std::string(""));
+
+    const LoadResult loaded = LoadFromFile(file.Path());
+    CHECK_EQ(loaded.problems.size(), std::size_t(0));
+    CHECK_EQ(loaded.story.title, std::string("Second"));
+}
+
+TEST(SaveToANewPathWorksWhenTheFileDoesNotExistYet)
+{
+    // ReplaceFileW requires the destination to exist, so the first save takes
+    // a different path through the code. Both must work.
+    const std::string path = "storynode_test_fresh_never_written.snproj";
+    std::remove(path.c_str());
+
+    const std::string error = SaveToFile(MakeEmptyStory("Fresh"), path);
+    CHECK_EQ(error, std::string(""));
+
+    const LoadResult loaded = LoadFromFile(path);
+    CHECK_EQ(loaded.problems.size(), std::size_t(0));
+    CHECK_EQ(loaded.story.title, std::string("Fresh"));
+
+    std::remove(path.c_str());
+}

@@ -4,328 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>StoryNode</title>
-<style>
-  /* ------------------------------------------------------------------
-     StoryNode interface shell.
 
-     Dark by default with a light variant, because a node graph is read for
-     long stretches and a bright field behind thin lines is tiring.
+<!-- ---------------------------------------------------------------------
+     The shell.
 
-     Fonts are Windows built-ins only. This page loads from memory with no
-     network access, so a webfont would simply fail to arrive.
-     ------------------------------------------------------------------ */
+     This file is the page skeleton and nothing else. The stylesheet, the
+     canvas and the inspector each live in their own directory and are
+     inlined here by the host before it navigates, in the order listed in
+     the generated ui_manifest.h.
 
-  :root {
-    --bg:          #16181c;
-    --panel:       #1c1f24;
-    --raised:      #23272e;
-    --rule:        #2c313a;
-    --text:        #d8dbe0;
-    --dim:         #8b929e;
-    --faint:       #5b626d;
-    --accent:      #ffa23a;
-    --accent-dim:  #7a4f16;
-    --ok:          #3ddc84;
-    --warn:        #ffc861;
-    --error:       #ff6b5e;
+     That split is not tidiness. Each area is a directory a separate task
+     owns, and two tasks editing one file is the conflict the worktree
+     harness exists to prevent. The cost is that this page has no <style>
+     or <script> tags of its own to fill in; the host does it.
 
-    --sans: "Segoe UI Variable Text", "Segoe UI", sans-serif;
-    --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
-
-    --row: 26px;
-    --pad: 12px;
-  }
-
-  @media (prefers-color-scheme: light) {
-    :root {
-      --bg:         #eceef1;
-      --panel:      #f7f8fa;
-      --raised:     #ffffff;
-      --rule:       #d2d6dd;
-      --text:       #21252b;
-      --dim:        #5f6672;
-      --faint:      #9aa1ad;
-      --accent:     #c46a00;
-      --accent-dim: #f0d3ab;
-      --ok:         #1a9e56;
-      --warn:       #9a6a00;
-      --error:      #cc3b2e;
-    }
-  }
-
-  * { box-sizing: border-box; }
-
-  html, body {
-    margin: 0;
-    height: 100%;
-    overflow: hidden;
-  }
-
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font: 12px/1.4 var(--sans);
-    display: grid;
-    grid-template-rows: auto 1fr auto;
-    user-select: none;
-  }
-
-  /* --- toolbar ------------------------------------------------------ */
-
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px var(--pad);
-    background: var(--panel);
-    border-bottom: 1px solid var(--rule);
-  }
-
-  .toolbar .title {
-    margin-left: auto;
-    color: var(--dim);
-    font-variant-numeric: tabular-nums;
-  }
-
-  button {
-    font: inherit;
-    color: var(--text);
-    background: var(--raised);
-    border: 1px solid var(--rule);
-    border-radius: 4px;
-    padding: 3px 10px;
-    cursor: pointer;
-  }
-
-  button:hover { border-color: var(--faint); }
-  button:active { background: var(--rule); }
-  button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
-
-  /* --- graph -------------------------------------------------------- */
-
-  .graph {
-    position: relative;
-    overflow: hidden;
-    /* A dot grid, so panning and zooming have a reference. Drawn with a
-       radial gradient rather than an image: no asset to load, and it scales
-       with the view. */
-    background-image: radial-gradient(circle, var(--rule) 1px, transparent 1px);
-    background-size: 24px 24px;
-    cursor: grab;
-  }
-
-  .graph.panning { cursor: grabbing; }
-
-  #viewport {
-    position: absolute;
-    inset: 0;
-    transform-origin: 0 0;
-  }
-
-  .node {
-    position: absolute;
-    width: 220px;
-    background: var(--panel);
-    border: 1px solid var(--rule);
-    border-radius: 6px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-    overflow: hidden;
-  }
-
-  .node.selected {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent), 0 2px 14px rgba(0, 0, 0, 0.45);
-  }
-
-  .node .head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 9px;
-    background: var(--raised);
-    border-bottom: 1px solid var(--rule);
-    cursor: move;
-  }
-
-  .node .kind {
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--accent);
-  }
-
-  .node .id {
-    margin-left: auto;
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--faint);
-  }
-
-  .node .body {
-    padding: 8px 9px;
-    min-height: 44px;
-    color: var(--dim);
-    font-size: 11px;
-  }
-
-  .node .body .empty { color: var(--faint); font-style: italic; }
-
-  /* Ports. Positioned on the node's edges and used as connection targets. */
-  .port {
-    position: absolute;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--raised);
-    border: 1px solid var(--faint);
-    top: 50%;
-    transform: translateY(-50%);
-  }
-
-  .port.in  { left: -5px; }
-  .port.out { right: -5px; border-color: var(--accent-dim); }
-  .port:hover { border-color: var(--accent); background: var(--accent-dim); }
-
-  /* --- edges -------------------------------------------------------- */
-
-  #edges {
-    position: absolute;
-    inset: 0;
-    overflow: visible;
-    pointer-events: none;
-  }
-
-  #edges path {
-    fill: none;
-    stroke: var(--faint);
-    stroke-width: 1.5;
-  }
-
-  #edges path:hover { stroke: var(--accent); }
-
-  /* --- side panel --------------------------------------------------- */
-
-  aside {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 300px;
-    background: var(--panel);
-    border-left: 1px solid var(--rule);
-    display: flex;
-    flex-direction: column;
-    transform: translateX(100%);
-    transition: transform 140ms ease;
-  }
-
-  aside.open { transform: none; }
-
-  aside h2 {
-    margin: 0;
-    padding: 8px var(--pad);
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--dim);
-    border-bottom: 1px solid var(--rule);
-  }
-
-  .inspector-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: var(--pad);
-  }
-
-  .field { margin-bottom: 10px; }
-
-  .field label {
-    display: block;
-    font-size: 10px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--dim);
-    margin-bottom: 3px;
-  }
-
-  .field input {
-    width: 100%;
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--rule);
-    border-radius: 4px;
-    padding: 4px 7px;
-  }
-
-  .field input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
-  .hint { color: var(--faint); font-style: italic; }
-
-  /* --- status bar --------------------------------------------------- */
-
-  footer {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 4px var(--pad);
-    background: var(--panel);
-    border-top: 1px solid var(--rule);
-    color: var(--dim);
-    font-size: 11px;
-  }
-
-  footer .spacer { margin-left: auto; }
-
-  .badge {
-    padding: 1px 7px;
-    border-radius: 9px;
-    font-size: 10px;
-  }
-
-  .badge.ok    { background: var(--accent-dim); color: var(--text); }
-  .badge.warn  { background: var(--warn); color: #000; }
-  .badge.error { background: var(--error); color: #000; }
-
-  /* Problems list. Shown in the panel so a warning has somewhere to live
-     other than a transient toast the user can miss. */
-  .problem {
-    padding: 6px 8px;
-    margin-bottom: 6px;
-    border-left: 3px solid var(--rule);
-    background: var(--bg);
-    border-radius: 3px;
-    font-size: 11px;
-    color: var(--dim);
-    user-select: text;
-  }
-
-  .problem.warning { border-left-color: var(--warn); }
-  .problem.error   { border-left-color: var(--error); color: var(--text); }
-
-  /* --- error surface ------------------------------------------------ */
-
-  #error {
-    position: absolute;
-    left: 50%;
-    bottom: 18px;
-    transform: translateX(-50%);
-    max-width: 70%;
-    padding: 8px 14px;
-    background: var(--error);
-    color: #000;
-    border-radius: 5px;
-    font-size: 11px;
-    white-space: pre-wrap;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-    display: none;
-  }
-
-  #error.show { display: block; }
-</style>
+     Everything the areas share is in the shell:
+       - the message protocol (window.storynode.receive, post)
+       - the current document and selection
+       - the render loop and the per-frame ordering
+     An area registers itself and is called; it never reaches into another
+     area.
+     --------------------------------------------------------------------- -->
 </head>
 <body>
 
@@ -339,6 +38,7 @@
 </header>
 
 <main class="graph" id="graph">
+  <!-- The canvas draws the graph into these two layers. -->
   <svg id="edges"></svg>
   <div id="viewport"></div>
   <aside id="panel">
@@ -360,542 +60,232 @@
 "use strict";
 
 // ---------------------------------------------------------------------------
-// The page holds no authoritative state.
+// The shell.
 //
-// It renders whatever document the host last sent and reports what the user
-// did. It never patches its own copy optimistically, so the two sides cannot
-// drift into disagreeing about the document. The cost is that a change is
-// visible only after the host answers, which is a round trip through a local
-// process and measures in microseconds.
+// Owns three things and nothing else:
+//
+//   1. The connection to the host, and the message protocol.
+//   2. The current document, the selection, and the validation problems.
+//   3. The render loop, which calls each registered area in a fixed order.
+//
+// An area (the canvas, the inspector) registers itself here and is called
+// back. The shell never calls into an area by name, and an area never reads
+// another area's state. That is what keeps the two independent enough to be
+// written in parallel.
 // ---------------------------------------------------------------------------
 
-var state = {
-  document: null,
-  selectedId: null,
-  problems: [],
-  // View transform. Presentation only: the host never sees it, and two
-  // windows onto the same document may differ.
-  pan: { x: 0, y: 0 },
-  zoom: 1
-};
+(function () {
+  "use strict";
 
-// --- talking to the host ----------------------------------------------------
+  // --- state ---------------------------------------------------------------
 
-function post(message) {
-  if (window.chrome && window.chrome.webview) {
-    window.chrome.webview.postMessage(JSON.stringify(message));
-  } else {
-    // Opened in a plain browser for development. Say so rather than failing
-    // silently on the first click.
-    showError("Not running inside the host: messages go nowhere.");
-  }
-}
+  var state = {
+    document: null,
+    selectedId: null,
+    problems: [],
 
-// The single entry point the host calls. One function rather than many named
-// callbacks, so adding a message type never changes the host code.
-window.storynode = {
-  receive: function (text) {
-    var message;
-    try {
-      message = JSON.parse(text);
-    } catch (e) {
-      showError("Malformed message from the host: " + e.message);
-      return;
+    // View transform. Presentation only: the host never sees it, and two
+    // windows onto the same document may differ.
+    pan: { x: 0, y: 0 },
+    zoom: 1
+  };
+
+  // Areas that draw part of the page. Registration order is call order.
+  var areas = [];
+
+  // --- the host connection -------------------------------------------------
+
+  /// Send a message to the host.
+  ///
+  /// Intent, not state: the host applies it to the document and broadcasts a
+  /// fresh snapshot. Nothing here patches its own copy optimistically, so the
+  /// two sides cannot drift into disagreeing about the document.
+  function post(message) {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage(JSON.stringify(message));
+    } else {
+      // Opened in a plain browser for development. Say so rather than failing
+      // silently on the first click.
+      showError("Not running inside the host: messages go nowhere.");
     }
-    handle(message);
   }
-};
 
-function handle(message) {
-  switch (message.type) {
-    case "document":
-      state.document = message.document;
-      if (state.selectedId && !findNode(state.selectedId)) {
-        state.selectedId = null;
+  // --- helpers -------------------------------------------------------------
+
+  function findNode(id) {
+    if (!state.document) { return null; }
+    var nodes = state.document.nodes || [];
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === id) { return nodes[i]; }
+    }
+    return null;
+  }
+
+  function findPort(node, id) {
+    var ports = node.ports || [];
+    for (var i = 0; i < ports.length; i++) {
+      if (ports[i].id === id) { return ports[i]; }
+    }
+    return null;
+  }
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function showError(text) {
+    var box = document.getElementById("error");
+    box.textContent = text;
+    box.classList.add("show");
+    clearTimeout(showError.timer);
+    showError.timer = setTimeout(function () {
+      box.classList.remove("show");
+    }, 6000);
+  }
+
+  // --- the render loop -----------------------------------------------------
+
+  function render() {
+    for (var i = 0; i < areas.length; i++) {
+      areas[i].render(state);
+    }
+    renderChrome(state);
+  }
+
+  /// The parts of the page the shell owns: the title, the counts, the
+  /// problems badge, the error box.
+  function renderChrome(current) {
+    var doc = current.document;
+    var nodes = doc ? (doc.nodes || []).length : 0;
+    var edges = doc ? (doc.edges || []).length : 0;
+
+    document.getElementById("counts").textContent =
+      nodes + (nodes === 1 ? " node, " : " nodes, ") +
+      edges + (edges === 1 ? " edge" : " edges");
+    document.getElementById("doc-title").textContent =
+      (doc && doc.title) ? doc.title : "Untitled";
+
+    renderProblems(current);
+  }
+
+  function renderProblems(current) {
+    var badge = document.getElementById("problems-badge");
+    var errors = 0;
+    var warnings = 0;
+
+    for (var i = 0; i < current.problems.length; i++) {
+      if (current.problems[i].severity === "error") { errors++; }
+      else { warnings++; }
+    }
+
+    if (errors > 0) {
+      badge.className = "badge error";
+      badge.textContent = errors + (errors === 1 ? " error" : " errors");
+    } else if (warnings > 0) {
+      badge.className = "badge warn";
+      badge.textContent = warnings + (warnings === 1 ? " warning" : " warnings");
+    } else {
+      badge.className = "badge ok";
+      badge.textContent = "no problems";
+    }
+  }
+
+  /// Change the selection and tell everything that cares.
+  ///
+  /// The one place selection changes. An area that set `selectedId` directly
+  /// would leave the other areas showing stale content, which is a bug that
+  /// only shows up once there are two areas.
+  function select(id) {
+    if (state.selectedId === id) { return; }
+    state.selectedId = id;
+    for (var i = 0; i < areas.length; i++) {
+      if (areas[i].onSelectionChanged) {
+        areas[i].onSelectionChanged(state);
       }
-      render();
-      break;
-
-    case "validation":
-      state.problems = message.problems || [];
-      renderProblems();
-      break;
-
-    case "error":
-      showError(message.message);
-      break;
-
-    default:
-      showError('Unknown message type "' + message.type + '" from the host.');
-  }
-}
-
-// --- helpers ----------------------------------------------------------------
-
-function findNode(id) {
-  if (!state.document) { return null; }
-  var nodes = state.document.nodes || [];
-  for (var i = 0; i < nodes.length; i++) {
-    if (nodes[i].id === id) { return nodes[i]; }
-  }
-  return null;
-}
-
-function findPort(node, id) {
-  var ports = node.ports || [];
-  for (var i = 0; i < ports.length; i++) {
-    if (ports[i].id === id) { return ports[i]; }
-  }
-  return null;
-}
-
-function escapeHtml(text) {
-  return String(text)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-// --- rendering --------------------------------------------------------------
-
-var viewport = document.getElementById("viewport");
-var edgesSvg = document.getElementById("edges");
-var inspector = document.getElementById("inspector");
-
-function render() {
-  renderNodes();
-  renderEdges();
-  renderInspector();
-  renderCounts();
-  applyTransform();
-}
-
-function applyTransform() {
-  viewport.style.transform =
-    "translate(" + state.pan.x + "px," + state.pan.y + "px) scale(" + state.zoom + ")";
-  // The edge layer is in the same coordinate space, so it gets the same
-  // transform. Both are children of the graph, which is what makes a single
-  // transform correct for the whole scene.
-  edgesSvg.style.transform = viewport.style.transform;
-  document.getElementById("zoom").textContent = Math.round(state.zoom * 100) + "%";
-}
-
-function renderNodes() {
-  var nodes = (state.document && state.document.nodes) || [];
-
-  // Rebuild rather than diff. A story has hundreds of nodes, and a
-  // full rebuild of a few hundred small elements is well inside a frame.
-  // Diffing would be faster and much easier to get subtly wrong.
-  var html = "";
-  for (var i = 0; i < nodes.length; i++) {
-    var node = nodes[i];
-    var selected = node.id === state.selectedId ? " selected" : "";
-    var x = (node.position && node.position.x) || 0;
-    var y = (node.position && node.position.y) || 0;
-
-    html += '<div class="node' + selected + '" data-id="' + escapeHtml(node.id) + '"'
-         +  ' style="left:' + x + 'px; top:' + y + 'px">'
-         +    '<div class="head">'
-         +      '<span class="kind">' + escapeHtml(node.type) + '</span>'
-         +      '<span class="id">' + escapeHtml(node.id) + '</span>'
-         +    '</div>'
-         +    '<div class="body">' + describeNode(node) + '</div>'
-         +    portsHtml(node)
-         +  '</div>';
+    }
+    render();
   }
 
-  viewport.innerHTML = html;
-}
+  // --- the message protocol ------------------------------------------------
 
-function describeNode(node) {
-  var data = node.data || {};
-  var summary = data.speaker || data.text || data.label;
-  if (summary) {
-    return escapeHtml(String(summary).slice(0, 80));
-  }
-  return '<span class="empty">no content yet</span>';
-}
+  function handle(message) {
+    switch (message.type) {
+      case "document":
+        state.document = message.document;
+        if (state.selectedId && !findNode(state.selectedId)) {
+          state.selectedId = null;
+        }
+        render();
+        break;
 
-function portsHtml(node) {
-  var ports = node.ports || [];
-  var html = "";
-  for (var i = 0; i < ports.length; i++) {
-    var port = ports[i];
-    var cls = port.kind === "input" ? "in" : "out";
-    // Vertical spread so several ports on one node do not overlap.
-    var offset = ports.length > 1 ? (i / (ports.length - 1)) : 0.5;
-    var top = 20 + offset * 60;
-    html += '<div class="port ' + cls + '" data-port="' + escapeHtml(port.id) + '"'
-         +  ' data-node="' + escapeHtml(node.id) + '"'
-         +  ' title="' + escapeHtml(port.label || port.id) + '"'
-         +  ' style="top:' + top + '%"></div>';
-  }
-  return html;
-}
+      case "validation":
+        state.problems = message.problems || [];
+        render();
+        break;
 
-function renderEdges() {
-  var doc = state.document;
-  if (!doc) {
-    edgesSvg.innerHTML = "";
-    return;
+      case "error":
+        showError(message.message);
+        break;
+
+      default:
+        showError('Unknown message type "' + message.type + '" from the host.');
+    }
   }
 
-  var html = "";
-  var edges = doc.edges || [];
-  for (var i = 0; i < edges.length; i++) {
-    var edge = edges[i];
-    var from = findNode(edge.from.nodeId);
-    var to = findNode(edge.to.nodeId);
-    if (!from || !to) { continue; }
-
-    var a = portPoint(from, edge.from.portId, "out");
-    var b = portPoint(to, edge.to.portId, "in");
-    html += '<path data-id="' + escapeHtml(edge.id) + '" d="' + curve(a, b) + '"></path>';
-  }
-
-  edgesSvg.innerHTML = html;
-}
-
-/// Where a port sits in graph coordinates. Must agree with the CSS, or the
-/// lines will not meet the dots.
-function portPoint(node, portId, kind) {
-  var x = (node.position && node.position.x) || 0;
-  var y = (node.position && node.position.y) || 0;
-  var width = (node.size && node.size.x) || 220;
-
-  var ports = node.ports || [];
-  var index = 0;
-  for (var i = 0; i < ports.length; i++) {
-    if (ports[i].id === portId) { index = i; break; }
-  }
-  var offset = ports.length > 1 ? (index / (ports.length - 1)) : 0.5;
-
-  return {
-    x: x + (kind === "out" ? width : 0),
-    y: y + 34 + offset * 44
+  // The single entry point the host calls. One function rather than many named
+  // callbacks, so adding a message type never changes the host code.
+  window.storynode = {
+    receive: function (text) {
+      var message;
+      try {
+        message = JSON.parse(text);
+      } catch (e) {
+        showError("Malformed message from the host: " + e.message);
+        return;
+      }
+      handle(message);
+    }
   };
-}
 
-/// A horizontal cubic bezier. Two control points pulled sideways give the
-/// familiar graph-editor curve, and the horizontal entry into the target
-/// reads as direction even when the edge runs backwards.
-function curve(a, b) {
-  var dx = Math.max(40, Math.abs(b.x - a.x) * 0.5);
-  return "M " + a.x + " " + a.y +
-         " C " + (a.x + dx) + " " + a.y +
-         ", " + (b.x - dx) + " " + b.y +
-         ", " + b.x + " " + b.y;
-}
+  // --- what an area gets ---------------------------------------------------
 
-function renderCounts() {
-  var doc = state.document;
-  var nodes = doc ? (doc.nodes || []).length : 0;
-  var edges = doc ? (doc.edges || []).length : 0;
-  document.getElementById("counts").textContent =
-    nodes + (nodes === 1 ? " node, " : " nodes, ") +
-    edges + (edges === 1 ? " edge" : " edges");
-  document.getElementById("doc-title").textContent =
-    (doc && doc.title) ? doc.title : "Untitled";
-}
+  /// The surface the shell exposes to an area.
+  ///
+  /// Deliberately small. An area can read the document and the selection, ask
+  /// for the selection to change, send a message to the host, and register
+  /// itself for rendering. It cannot reach another area, and it cannot replace
+  /// the document — only the host does that, from a message it applied.
+  window.storynode.shell = {
+    state: state,
 
-function renderInspector() {
-  var node = state.selectedId ? findNode(state.selectedId) : null;
-  var panel = document.getElementById("panel");
+    register: function (area) {
+      areas.push(area);
+      if (area.initialise) {
+        area.initialise(window.storynode.shell);
+      }
+    },
 
-  if (!node) {
-    panel.classList.remove("open");
-    inspector.innerHTML = '<p class="hint">Select a node to edit it.</p>';
-    return;
-  }
-
-  panel.classList.add("open");
-
-  var html = '<div class="field"><label>id</label>'
-           + '<input value="' + escapeHtml(node.id) + '" disabled></div>'
-           + '<div class="field"><label>type</label>'
-           + '<input value="' + escapeHtml(node.type) + '" disabled></div>';
-
-  // Editable properties. A later wave drives these from the node type's
-  // declared schema; for now every type gets the same two, which is enough
-  // to prove the round trip works.
-  var data = node.data || {};
-  html += propertyField("speaker", data.speaker || "");
-  html += propertyField("text", data.text || "");
-
-  html += '<h2 style="margin:14px 0 8px; padding:0; border:0;">Problems</h2>';
-  html += problemsFor(node.id);
-
-  inspector.innerHTML = html;
-}
-
-function propertyField(key, value) {
-  return '<div class="field"><label>' + escapeHtml(key) + '</label>'
-       + '<input data-key="' + escapeHtml(key) + '" value="' + escapeHtml(value) + '"></div>';
-}
-
-function problemsFor(nodeId) {
-  var relevant = [];
-  for (var i = 0; i < state.problems.length; i++) {
-    var problem = state.problems[i];
-    if (problem.subjectId === nodeId) { relevant.push(problem); }
-  }
-  if (relevant.length === 0) {
-    return '<p class="hint">Nothing reported for this node.</p>';
-  }
-  var html = "";
-  for (var j = 0; j < relevant.length; j++) {
-    var p = relevant[j];
-    html += '<div class="problem ' + escapeHtml(p.severity) + '">'
-         +  escapeHtml(p.message) + '</div>';
-  }
-  return html;
-}
-
-function renderProblems() {
-  var badge = document.getElementById("problems-badge");
-  var errors = 0;
-  var warnings = 0;
-
-  for (var i = 0; i < state.problems.length; i++) {
-    if (state.problems[i].severity === "error") { errors++; }
-    else { warnings++; }
-  }
-
-  if (errors > 0) {
-    badge.className = "badge error";
-    badge.textContent = errors + (errors === 1 ? " error" : " errors");
-  } else if (warnings > 0) {
-    badge.className = "badge warn";
-    badge.textContent = warnings + (warnings === 1 ? " warning" : " warnings");
-  } else {
-    badge.className = "badge ok";
-    badge.textContent = "no problems";
-  }
-
-  renderInspector();
-}
-
-function showError(text) {
-  var box = document.getElementById("error");
-  box.textContent = text;
-  box.classList.add("show");
-  clearTimeout(showError.timer);
-  showError.timer = setTimeout(function () {
-    box.classList.remove("show");
-  }, 6000);
-}
-
-// --- interaction ------------------------------------------------------------
-
-// Panning. The whole graph is dragged with the middle button or with the left
-// button on empty space, which is what every node editor does and therefore
-// what the hand expects.
-var graph = document.getElementById("graph");
-var panning = null;
-
-graph.addEventListener("mousedown", function (event) {
-  if (event.target !== graph && event.target !== edgesSvg && event.target !== viewport) {
-    return;
-  }
-  panning = { x: event.clientX, y: event.clientY, px: state.pan.x, py: state.pan.y };
-  graph.classList.add("panning");
-  event.preventDefault();
-});
-
-window.addEventListener("mousemove", function (event) {
-  if (panning) {
-    state.pan.x = panning.px + (event.clientX - panning.x);
-    state.pan.y = panning.py + (event.clientY - panning.y);
-    applyTransform();
-  }
-  if (dragging) {
-    var scale = state.zoom;
-    dragging.node.position.x = dragging.startX + (event.clientX - dragging.x) / scale;
-    dragging.node.position.y = dragging.startY + (event.clientY - dragging.y) / scale;
-    var element = viewport.querySelector('[data-id="' + dragging.node.id + '"]');
-    if (element) {
-      element.style.left = dragging.node.position.x + "px";
-      element.style.top = dragging.node.position.y + "px";
-    }
-    renderEdges();
-  }
-});
-
-window.addEventListener("mouseup", function (event) {
-  if (panning) {
-    panning = null;
-    graph.classList.remove("panning");
-  }
-  if (dragging) {
-    // One message when the drag ends, not one per mouse move. A node drag
-    // that sent a message per frame would put the whole document through the
-    // bridge sixty times a second for one gesture.
-    post({
-      type: "moveNode",
-      id: dragging.node.id,
-      x: dragging.node.position.x,
-      y: dragging.node.position.y
-    });
-    dragging = null;
-  }
-});
-
-// Zoom. Anchored on the pointer so the thing under the cursor stays put,
-// which is the difference between zooming feeling controlled and feeling
-// like the view is sliding away.
-graph.addEventListener("wheel", function (event) {
-  event.preventDefault();
-
-  var rect = graph.getBoundingClientRect();
-  var mx = event.clientX - rect.left;
-  var my = event.clientY - rect.top;
-
-  var factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
-  var next = Math.min(4, Math.max(0.15, state.zoom * factor));
-  var applied = next / state.zoom;
-
-  state.pan.x = mx - (mx - state.pan.x) * applied;
-  state.pan.y = my - (my - state.pan.y) * applied;
-  state.zoom = next;
-
-  applyTransform();
-}, { passive: false });
-
-// Node selection and dragging.
-var dragging = null;
-
-viewport.addEventListener("mousedown", function (event) {
-  var portElement = event.target.closest(".port");
-  if (portElement) { return; }
-
-  var nodeElement = event.target.closest(".node");
-  if (!nodeElement) { return; }
-
-  var id = nodeElement.dataset.id;
-  var node = findNode(id);
-  if (!node) { return; }
-
-  state.selectedId = id;
-  renderNodes();
-  renderInspector();
-
-  dragging = {
-    node: node,
-    x: event.clientX,
-    y: event.clientY,
-    startX: (node.position && node.position.x) || 0,
-    startY: (node.position && node.position.y) || 0
+    post: post,
+    select: select,
+    findNode: findNode,
+    findPort: findPort,
+    escapeHtml: escapeHtml,
+    showError: showError,
+    render: render
   };
-  event.preventDefault();
-  event.stopPropagation();
-});
 
-// Clicking empty graph space clears the selection.
-graph.addEventListener("mousedown", function (event) {
-  if (event.target === graph || event.target === viewport || event.target === edgesSvg) {
-    if (state.selectedId) {
-      state.selectedId = null;
-      renderNodes();
-      renderInspector();
-    }
-  }
-});
+  // --- start ---------------------------------------------------------------
 
-// Property editing. Sent on change, which fires when the field loses focus or
-// the user presses Enter, rather than on every keystroke.
-inspector.addEventListener("change", function (event) {
-  var input = event.target.closest("input[data-key]");
-  if (!input || !state.selectedId) { return; }
-
-  post({
-    type: "setProperty",
-    id: state.selectedId,
-    key: input.dataset.key,
-    value: input.value
-  });
-});
-
-// Toolbar.
-document.getElementById("add-dialog").addEventListener("click", function () {
-  addNodeAtViewCentre("dialog");
-});
-document.getElementById("add-branch").addEventListener("click", function () {
-  addNodeAtViewCentre("branch");
-});
-document.getElementById("add-end").addEventListener("click", function () {
-  addNodeAtViewCentre("end");
-});
-
-function addNodeAtViewCentre(type) {
-  var rect = graph.getBoundingClientRect();
-  // Place it where the user is looking, not at the document origin, which
-  // may be far off screen.
-  var x = (rect.width / 2 - state.pan.x) / state.zoom - 110;
-  var y = (rect.height / 2 - state.pan.y) / state.zoom - 40;
-  post({ type: "addNode", nodeType: type, x: x, y: y });
-}
-
-document.getElementById("delete").addEventListener("click", function () {
-  if (!state.selectedId) {
-    showError("Select a node first.");
-    return;
-  }
-  post({ type: "removeNode", id: state.selectedId });
-  state.selectedId = null;
-});
-
-document.getElementById("fit").addEventListener("click", fitToWindow);
-
-function fitToWindow() {
-  var nodes = (state.document && state.document.nodes) || [];
-  if (nodes.length === 0) { return; }
-
-  var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (var i = 0; i < nodes.length; i++) {
-    var p = nodes[i].position || { x: 0, y: 0 };
-    var w = (nodes[i].size && nodes[i].size.x) || 220;
-    var h = (nodes[i].size && nodes[i].size.y) || 120;
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x + w);
-    maxY = Math.max(maxY, p.y + h);
-  }
-
-  var rect = graph.getBoundingClientRect();
-  var margin = 60;
-  var scale = Math.min(
-    (rect.width - margin * 2) / Math.max(1, maxX - minX),
-    (rect.height - margin * 2) / Math.max(1, maxY - minY)
-  );
-  state.zoom = Math.min(1.5, Math.max(0.15, scale));
-
-  state.pan.x = rect.width / 2 - ((minX + maxX) / 2) * state.zoom;
-  state.pan.y = rect.height / 2 - ((minY + maxY) / 2) * state.zoom;
-  applyTransform();
-}
-
-// Keyboard. Delete removes the selection, which is what the key means in
-// every editor and is the fastest way to undo a misclick.
-window.addEventListener("keydown", function (event) {
-  var inField = event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA";
-  if (inField) { return; }
-
-  if (event.key === "Delete" || event.key === "Backspace") {
-    if (state.selectedId) {
-      post({ type: "removeNode", id: state.selectedId });
-      state.selectedId = null;
-      event.preventDefault();
-    }
-  }
-});
-
-// --- start ------------------------------------------------------------------
-
-// Tell the host we are listening. Nothing the host sends before this arrives
-// is delivered, so this is not optional politeness: without it the page
-// loads with no document and looks broken.
-post({ type: "ready" });
+  // Tell the host we are listening. Nothing the host sends before this arrives
+  // is delivered, so this is not optional politeness: without it the page loads
+  // with no document and looks broken.
+  post({ type: "ready" });
+})();
 </script>
+
 </body>
 </html>

@@ -137,15 +137,54 @@ if(WIN32 AND STORYNODE_BUILD_APP AND STORYNODE_HAVE_WEBVIEW2)
     # Win32 is UTF-16. Nothing here wants an ANSI code page.
     target_compile_definitions(storynode PRIVATE UNICODE _UNICODE)
 
-    # The HTML interface is compiled into the executable as a resource and
-    # loaded with NavigateToString, so there is no temporary file to write and
-    # no local HTTP server to run.
+    # --- interface assets ---------------------------------------------------
+    #
+    # The interface is split across files so parallel tasks never edit the same
+    # one. The page cannot load them itself: NavigateToString gives it an
+    # opaque origin, so a <script src> or a fetch to a sibling is refused and
+    # there is no local server to ask instead.
+    #
+    # So every asset is embedded as a resource and inlined by the host before
+    # it navigates. The list is generated from a glob, not written by hand: a
+    # hand-written list would be a shared file every task must edit, which is
+    # the conflict the split exists to prevent.
+    set(STORYNODE_UI_ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ui/assets")
+    set(STORYNODE_UI_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    file(MAKE_DIRECTORY "${STORYNODE_UI_GENERATED_DIR}")
+
+    set(STORYNODE_UI_RC "${STORYNODE_UI_GENERATED_DIR}/ui_resources.rc")
+
+    # Regenerated at configure time, which CONFIGURE_DEPENDS makes happen again
+    # whenever an asset is added or removed.
+    #
+    # The script takes the assets directory and the output directory by name,
+    # so those two variables are the whole interface to it.
+    include("${CMAKE_SOURCE_DIR}/cmake/GenerateUiResources.cmake")
+
+    target_include_directories(
+        storynode
+        PRIVATE "${STORYNODE_UI_GENERATED_DIR}"
+    )
+
+    # The generated resource script needs the same UNICODE defines as the C++,
+    # or the resource compiler is not guaranteed to agree about the encoding of
+    # the names it writes.
+    set_source_files_properties(
+        "${STORYNODE_UI_RC}"
+        PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE"
+    )
+
+    # The icons and version information stay hand-written: they are not part of
+    # the interface split and there are only two of them.
     set(STORYNODE_UI_RESOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ui/assets/app.rc")
     if(EXISTS "${STORYNODE_UI_RESOURCE}")
-        target_sources(storynode PRIVATE "${STORYNODE_UI_RESOURCE}")
+        target_sources(
+            storynode
+            PRIVATE "${STORYNODE_UI_RESOURCE}" "${STORYNODE_UI_RC}"
+        )
     endif()
 
-    # The resource compiler needs to find ui.html next to app.rc.
+    # The resource compiler needs to find app.ico next to app.rc.
     set_property(
         TARGET storynode
         PROPERTY
@@ -153,3 +192,15 @@ if(WIN32 AND STORYNODE_BUILD_APP AND STORYNODE_HAVE_WEBVIEW2)
                 "${CMAKE_CURRENT_SOURCE_DIR}/ui/assets"
     )
 endif()
+
+# ---------------------------------------------------------------------------
+# Developer tools.
+#
+# Added here rather than from the root so that STORYNODE_UI_RC is in scope.
+# A variable set in this file is visible to a subdirectory added from this
+# file, and not to a sibling directory added from the root — which is how the
+# resource probe came to be built without any resources in it and report every
+# asset as missing.
+# ---------------------------------------------------------------------------
+
+add_subdirectory(tools)

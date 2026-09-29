@@ -100,6 +100,15 @@ struct Endpoint
     std::string nodeId;
     std::string portId;
 
+    /// Keys present in the file that this version does not recognise.
+    ///
+    /// Every level of the document carries one of these, including this one.
+    /// Without it, a key added to an endpoint by a newer build — a condition,
+    /// a delay, a port qualifier — is deleted the first time this build saves
+    /// the file. That is silent data loss on a level a reader would not think
+    /// to check, because the level above it is handled correctly.
+    json::Value extra { json::Object {} };
+
     bool operator==(const Endpoint& other) const
     {
         return nodeId == other.nodeId && portId == other.portId;

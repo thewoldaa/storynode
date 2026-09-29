@@ -1,0 +1,117 @@
+/* ---------------------------------------------------------------------------
+   The canvas: the graph area.
+
+   Only what the graph needs. The colours and the typography come from
+   styles/theme.css, which the shell loads first.
+
+   The geometry here has to agree with canvas/canvas.js, which computes the
+   same positions to draw the edges. The numbers are named there and written
+   literally here, so a change to one is a visible change to the other rather
+   than a silent drift that only shows up as edges missing their ports.
+   --------------------------------------------------------------------------- */
+
+.graph {
+  /* A dot grid, so panning and zooming have a reference. Drawn with a radial
+     gradient rather than an image: no asset to load, and it scales with the
+     view. */
+  background-image: radial-gradient(circle, var(--rule) 1px, transparent 1px);
+  background-size: 24px 24px;
+  cursor: grab;
+}
+
+.graph.panning { cursor: grabbing; }
+
+#viewport {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+
+/* --- nodes ---------------------------------------------------------------- */
+
+.node {
+  position: absolute;
+  width: 220px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.node.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 14px rgba(0, 0, 0, 0.45);
+}
+
+.node .head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;              /* must equal HEADER_HEIGHT in canvas.js */
+  padding: 0 9px;
+  background: var(--raised);
+  border-bottom: 1px solid var(--rule);
+  cursor: move;
+}
+
+.node .kind {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.node .id {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--faint);
+}
+
+.node .body {
+  padding: 8px 9px;
+  min-height: 44px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.node .body .empty { color: var(--faint); font-style: italic; }
+
+/* --- ports ----------------------------------------------------------------
+
+   Positioned on the node's edges and used as connection targets. The vertical
+   position is set inline by canvas.js, which is the side that knows how many
+   ports there are. */
+
+.port {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--raised);
+  border: 1px solid var(--faint);
+  transform: translateY(-50%);
+}
+
+.port.in  { left: -5px; }
+.port.out { right: -5px; border-color: var(--accent-dim); }
+.port:hover { border-color: var(--accent); background: var(--accent-dim); }
+
+/* --- edges ---------------------------------------------------------------- */
+
+#edges {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  transform-origin: 0 0;
+}
+
+#edges path {
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1.5;
+}
+
+#edges path:hover { stroke: var(--accent); }

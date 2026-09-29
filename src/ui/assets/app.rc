@@ -1,9 +1,15 @@
 #include "resource.h"
 #include <winver.h>
 
-// The interface is served straight from the binary. NavigateToString then
-// needs no temporary files and no local web server.
-IDR_UI_HTML RCDATA "ui.html"
+// The interface assets are NOT declared here.
+//
+// They are globbed by cmake/GenerateUiResources.cmake, which writes one
+// RCDATA entry per file into a generated script that is compiled alongside
+// this one. Listing them by hand would be a shared file every task must edit,
+// which is exactly the conflict the interface split exists to prevent.
+//
+// So this file holds only the two things that are not part of the split and
+// that a task never touches: the icon and the version information.
 
 IDI_APPICON ICON "app.ico"
 

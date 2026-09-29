@@ -27,6 +27,20 @@ Parallel. Four disjoint surfaces.
 | `project-io` | Planned | `src/core/io/**` | File dialogs, recent files, dirty tracking |
 | `undo` | Planned | `src/core/history/**` | Command stack, coalescing, bounded depth |
 
+## Wave 1.5 — Split the interface
+
+Sequential, one task. Landed before wave 1 because wave 1 cannot start without
+it.
+
+| Task | Status | Deliverable |
+| --- | --- | --- |
+| `ui-split` | **Complete** | The interface split into a shell and per-area directories, so two tasks can own two parts of it |
+
+The four wave 1 tasks were planned as parallel, but two of them work on the
+interface and the interface was one file. Two tasks editing one file is the
+conflict the harness exists to prevent, so the split became its own wave rather
+than a relaxation of the rule.
+
 ## Wave 2 — Node types
 
 Parallel. One task per node family plus the layout engine that arranges them.
