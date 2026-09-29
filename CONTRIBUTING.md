@@ -72,6 +72,26 @@ The rules that make parallel work safe:
    files and CMake caches separate so parallel builds never touch the same
    file.
 
+### Two paths no task has to declare
+
+**`tests/`** — every task that adds behaviour adds a test for it, and a task
+that adds behaviour without a test is the thing the tests exist to prevent. So
+the test tree is not a territory to be claimed; it is a consequence of doing
+the work.
+
+Requiring each declaration to list it produces a rule that is either restated
+in every file or broken by every file, and a rule that is always broken stops
+being read. It was widened after the fact twice before this was written down,
+which is the signal that the rule itself was wrong.
+
+**A task's own declaration** — `tasks/wave-N/task.md`. Requiring a task to list
+its declaration inside its declaration is a circle.
+
+Note what is *not* exempt. `src/ui/assets/**` and `src/app/**` stay claimed,
+because two tasks writing the same stylesheet or the same window code is
+exactly the conflict the check exists to catch. Only the test tree is a
+consequence of the work rather than a place to work.
+
 ## Commits
 
 [Conventional Commits](https://www.conventionalcommits.org/), scoped to the

@@ -296,6 +296,26 @@ function Test-HarnessPathInTerritory {
     return $false
 }
 
+# Is this path always allowed, whatever a task declares?
+#
+# Every task that adds behaviour adds a test for it, and a task that adds
+# behaviour without a test is the thing the tests exist to prevent. So the test
+# tree is not a territory to be claimed; it is a consequence of doing the work.
+# Requiring each declaration to list it produces a rule that is either
+# restated in every file or broken by every file, and a rule that is always
+# broken stops being read.
+#
+# Note what is NOT here. `src/ui/assets/**` and `src/app/**` are not, because
+# two tasks writing the same stylesheet or the same window code is exactly the
+# conflict this check exists to catch. A shared surface stays a shared surface;
+# only the test tree is a consequence of the work rather than a place to work.
+function Test-HarnessPathAlwaysAllowed {
+    param([string] $Path)
+
+    $p = $Path -replace '\\', '/'
+    return $p.StartsWith('tests/', [System.StringComparison]::Ordinal)
+}
+
 # Check that every file a task has touched falls inside its territory.
 function Test-HarnessTaskChanges {
     param([string] $Wave, [string] $Task, [string] $Worktree)
@@ -339,6 +359,9 @@ function Test-HarnessTaskChanges {
 
     $outside = New-Object System.Collections.Generic.List[string]
     foreach ($f in $changed) {
+        # Paths that are a consequence of the work rather than a place to work.
+        if (Test-HarnessPathAlwaysAllowed -Path $f) { continue }
+
         $inside = $false
         foreach ($t in $territories) {
             if (Test-HarnessPathInTerritory -Path $f -Territory $t) { $inside = $true; break }

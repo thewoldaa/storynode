@@ -323,6 +323,32 @@ harness_path_in_territory() {
   return 1
 }
 
+# Is this path always allowed, whatever a task declares?
+#
+# Two categories, for different reasons.
+#
+# `tests/` — every task that adds behaviour adds a test for it, and a task that
+# adds behaviour without a test is the thing the tests exist to prevent. So the
+# test tree is not a territory to be claimed; it is a consequence of doing the
+# work. Requiring each declaration to list it produces a rule that is either
+# restated in every file or broken by every file, and a rule that is always
+# broken stops being read. It has been widened after the fact twice already,
+# which is the signal that the rule itself was wrong.
+#
+# A task's own declaration — see the note in harness_check_task_changes.
+#
+# Note what is NOT here. `src/ui/assets/**` and `src/app/**` are not, because
+# two tasks writing the same stylesheet or the same window code is exactly the
+# conflict this check exists to catch. A shared surface stays a shared surface;
+# only the test tree is a consequence of the work rather than a place to work.
+harness_path_always_allowed() {
+  local path="$1"
+  case "$path" in
+    tests/*) return 0 ;;
+  esac
+  return 1
+}
+
 # Check that every file a task has touched falls inside its territory.
 harness_check_task_changes() {
   local wave="$1" task="$2" worktree="$3"
@@ -367,6 +393,12 @@ harness_check_task_changes() {
     # declaration in its declaration is a circle, and the file is the task's
     # own description of itself.
     if [ "$f" = "tasks/wave-${wave}/${task}.md" ]; then
+      continue
+    fi
+
+    # Paths that are a consequence of the work rather than a place to work.
+    # See harness_path_always_allowed.
+    if harness_path_always_allowed "$f"; then
       continue
     fi
 
