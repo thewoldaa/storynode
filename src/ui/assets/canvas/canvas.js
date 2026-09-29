@@ -100,7 +100,7 @@
     return ((HEADER_HEIGHT + offset * PORT_SPREAD) / NODE_HEIGHT) * 100;
   }
 
-  /// The four control numbers of a cubic bezier between two ports.
+  /// The two control points of a cubic bezier between two ports.
   ///
   /// Two control points pulled sideways give the familiar graph-editor curve.
   /// The horizontal entry into the target reads as direction even when the
@@ -112,19 +112,31 @@
   /// nodes — the curve has nowhere to go. Pulling them by the target's width
   /// plus the gap instead sends the curve out past the target and back into
   /// its input from the left, which is where the dot is.
-  function curveBetween(a, b, backward) {
+  ///
+  /// Returned as numbers rather than as a path string so that the offsetting
+  /// below moves points instead of parsing them. The first version of this
+  /// built the string and then split it to move the control points, and the
+  /// split collapsed the ", " separators into one — so the offset was applied
+  /// to a shorter list than it expected, the guard below rejected it, and two
+  /// edges between the same pair of ports drew the identical path.
+  function curveControl(a, b, backward) {
     if (backward) {
       var reach = Math.max(80, Math.abs(a.x - b.x) * 0.5 + 60);
-      return "M " + a.x + " " + a.y +
-             " C " + (a.x + reach) + " " + a.y +
-             ", " + (b.x - reach) + " " + b.y +
-             ", " + b.x + " " + b.y;
+      return { x1: a.x + reach, y1: a.y, x2: b.x - reach, y2: b.y };
     }
     var dx = Math.max(40, Math.abs(b.x - a.x) * 0.5);
+    return { x1: a.x + dx, y1: a.y, x2: b.x - dx, y2: b.y };
+  }
+
+  function formatCurve(a, b, control) {
     return "M " + a.x + " " + a.y +
-           " C " + (a.x + dx) + " " + a.y +
-           ", " + (b.x - dx) + " " + b.y +
+           " C " + control.x1 + " " + control.y1 +
+           ", " + control.x2 + " " + control.y2 +
            ", " + b.x + " " + b.y;
+  }
+
+  function curveBetween(a, b, backward) {
+    return formatCurve(a, b, curveControl(a, b, backward));
   }
 
   /// A cubic bezier, displaced sideways.
@@ -137,29 +149,24 @@
   /// endpoints, so a bundle of edges separates the same way whichever
   /// direction the pair runs.
   function curvePath(a, b, backward, offset) {
-    var path = curveBetween(a, b, backward);
-    if (!offset) { return path; }
+    var control = curveControl(a, b, backward);
+    if (!offset) { return formatCurve(a, b, control); }
 
     var dx = b.x - a.x;
     var dy = b.y - a.y;
     var length = Math.sqrt(dx * dx + dy * dy);
-    if (length < 0.001) { return path; }
+    if (length < 0.001) { return formatCurve(a, b, control); }
 
     // The normal of (dx, dy), scaled so `offset` is the distance moved.
     var nx = (-dy / length) * offset;
     var ny = (dx / length) * offset;
 
-    // The control points are the two pairs after "C ". Shifting them moves
-    // the curve's middle and leaves both ends where they are.
-    var numbers = path.slice(path.indexOf("C") + 1).split(/[ ,]+/);
-    if (numbers.length < 8) { return path; }
+    control.x1 += nx;
+    control.y1 += ny;
+    control.x2 += nx;
+    control.y2 += ny;
 
-    var moved = "M " + a.x + " " + a.y + " C ";
-    for (var i = 0; i < 8; i += 2) {
-      moved += (parseFloat(numbers[i]) + nx) + " " + (parseFloat(numbers[i + 1]) + ny);
-      moved += i === 6 ? ", " + b.x + " " + b.y : ", ";
-    }
-    return moved;
+    return formatCurve(a, b, control);
   }
 
   // --- measurement ---------------------------------------------------------
@@ -533,22 +540,39 @@
   /// Two edges joining the same pair of ports draw on top of each other, and a
   /// user cannot tell whether there are two or one. Giving each a position in
   /// the bundle is what separates them.
+  ///
+  /// Keyed by edge id, not by port pair. A single group object per pair looks
+  /// equivalent and is not: the running position is per-edge state, and
+  /// storing it on the shared object means the last edge to be numbered
+  /// overwrites it for all of them. The first version did exactly that, and
+  /// two edges between one pair of ports drew the identical path — which is
+  /// the one outcome this function exists to prevent.
   function parallelGroups(doc) {
+    var counts = {};
+    var taken = {};
     var groups = {};
     var edges = doc.edges || [];
-    for (var i = 0; i < edges.length; i++) {
-      var key = edges[i].from.nodeId + "\u001f" + edges[i].from.portId + "\u001f" +
-                edges[i].to.nodeId + "\u001f" + edges[i].to.portId;
-      if (!groups[key]) { groups[key] = { index: 0, count: 0 }; }
-      groups[key].count++;
+    var i;
+
+    for (i = 0; i < edges.length; i++) {
+      var key = edgePairKey(edges[i]);
+      counts[key] = (counts[key] || 0) + 1;
     }
-    for (var j = 0; j < edges.length; j++) {
-      var id = edges[j].from.nodeId + "\u001f" + edges[j].from.portId + "\u001f" +
-               edges[j].to.nodeId + "\u001f" + edges[j].to.portId;
-      groups[id].index = groups[id].taken || 0;
-      groups[id].taken = groups[id].index + 1;
+
+    for (i = 0; i < edges.length; i++) {
+      var id = edgePairKey(edges[i]);
+      var index = taken[id] || 0;
+      taken[id] = index + 1;
+      groups[edges[i].id] = { index: index, count: counts[id] };
     }
+
     return groups;
+  }
+
+  /// The four fields that decide which edges share a bundle.
+  function edgePairKey(edge) {
+    return edge.from.nodeId + "\u001f" + edge.from.portId + "\u001f" +
+           edge.to.nodeId + "\u001f" + edge.to.portId;
   }
 
   function applyTransform() {
@@ -912,23 +936,57 @@
     return "";
   }
 
-  /// The port under a point, or null.
+  /// Every port's position on screen, measured once at the start of a drag.
   ///
-  /// Hit-tested against the port dots rather than by event target, because a
-  /// connection drag has to find a port under the cursor while the mouse is
-  /// captured by the drag. `closest` would need the pointer to be over the
-  /// element, and the preview line is under it.
-  function portAt(clientX, clientY) {
-    var dot = document.elementFromPoint(clientX, clientY);
-    if (!dot) { return null; }
-    dot = dot.closest ? dot.closest(".port") : null;
-    if (!dot) { return null; }
+  /// Hit-testing cannot use `elementFromPoint`: the port layer sits inside a
+  /// scaled and translated container, so the browser answers in viewport
+  /// coordinates and a dot's own box has to be read the same way. Measuring
+  /// the boxes once is both exact and cheap — the nodes cannot move during a
+  /// connection drag, so the snapshot stays valid for the whole gesture, and
+  /// a mousemove costs a scan of a flat array instead of a walk of the graph.
+  function snapshotPorts() {
+    var nodes = (shell.state.document && shell.state.document.nodes) || [];
+    var found = [];
 
-    var node = nodeById(dot.dataset.node);
-    if (!node) { return null; }
-    var port = shell.findPort(node, dot.dataset.port);
-    if (!port) { return null; }
-    return { node: node, port: port, element: dot };
+    for (var i = 0; i < nodes.length; i++) {
+      var entry = elements[nodes[i].id];
+      if (!entry) { continue; }
+
+      var dots = entry.element.querySelectorAll(".port");
+      for (var j = 0; j < dots.length; j++) {
+        var port = shell.findPort(nodes[i], dots[j].dataset.port);
+        if (!port) { continue; }
+        found.push({
+          node: nodes[i],
+          port: port,
+          element: dots[j],
+          box: dots[j].getBoundingClientRect()
+        });
+      }
+    }
+    return found;
+  }
+
+  /// The port under a point, or null.
+  function portAt(clientX, clientY) {
+    var ports = connect ? connect.ports : null;
+    if (!ports) { return null; }
+
+    for (var i = 0; i < ports.length; i++) {
+      var box = ports[i].box;
+      // A dot is 10px before zoom and the box scales with it, so the slop
+      // comes from the box. The minimum keeps a port grabbable when the graph
+      // is zoomed far out, where the box is a few pixels across.
+      var slopX = Math.max(3, box.width / 2);
+      var slopY = Math.max(3, box.height / 2);
+      var cx = box.left + box.width / 2;
+      var cy = box.top + box.height / 2;
+
+      if (Math.abs(clientX - cx) <= slopX && Math.abs(clientY - cy) <= slopY) {
+        return ports[i];
+      }
+    }
+    return null;
   }
 
   function beginConnect(portInfo, event) {
@@ -939,7 +997,9 @@
       fromKind: portInfo.port.kind,
       fromPort: portInfo.port,
       fromNode: portInfo.node,
-      target: null
+      ports: snapshotPorts(),
+      target: null,
+      reason: ""
     };
     graph.classList.add("connecting");
     event.preventDefault();
