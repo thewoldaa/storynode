@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+# The UI verification pass.
+#
+# Runs the built editor with --verify, which loads the interface, has the page
+# measure its own layout, and exits non-zero if a band of the interface is
+# missing, collapsed, or overlapping.
+#
+# This is a CTest test rather than a CI step so that it runs wherever the
+# tests run. It is skipped automatically when the application was not built,
+# which is what happens on a machine without the WebView2 SDK.
+# ---------------------------------------------------------------------------
+
+if(NOT WIN32)
+    return()
+endif()
+
+if(NOT TARGET storynode)
+    # No WebView2 SDK, so no application to verify. Not a failure: the model,
+    # the format and the bridge are all tested without it.
+    return()
+endif()
+
+# The sizes are the point of the test. A layout that happens to be correct at
+# one window size is not evidence that it is correct: the footer sitting at
+# the bottom of a large window proves nothing about a small one, which is
+# where a missing `min-height: 0` or a fixed grid row shows up.
+set(STORYNODE_VERIFY_SIZES
+    "1280x800"
+    "900x600"
+    "700x500"
+    "1920x1080")
+
+foreach(size IN LISTS STORYNODE_VERIFY_SIZES)
+    string(REPLACE "x" "_" size_id "${size}")
+
+    add_test(
+        NAME "ui_layout_${size_id}"
+        COMMAND "$<TARGET_FILE:storynode>"
+                --verify
+                --size "${size}"
+                --report "${CMAKE_CURRENT_BINARY_DIR}/layout_${size_id}.txt")
+
+    # The app has its own 30-second watchdog and exits 1 on timeout, so this
+    # is a backstop for a hang before that timer starts.
+    set_tests_properties("ui_layout_${size_id}" PROPERTIES TIMEOUT 90)
+
+    # The report is the useful artifact when this fails, so keep it on disk
+    # and print it in the CTest output.
+    set_tests_properties("ui_layout_${size_id}" PROPERTIES
+        FAIL_REGULAR_EXPRESSION "FAIL")
+endforeach()
+
+# A size the argument parser must reject rather than pass through to Win32,
+# where a zero-sized window would make WebView2 skip layout and the report
+# would be all zeroes. Zeroes look like a layout bug, so a bad argument must
+# not reach the window.
+add_test(
+    NAME "ui_layout_rejects_bad_size"
+    COMMAND "$<TARGET_FILE:storynode>"
+            --verify
+            --size "0x0"
+            --report "${CMAKE_CURRENT_BINARY_DIR}/layout_bad_size.txt")
+set_tests_properties("ui_layout_rejects_bad_size" PROPERTIES TIMEOUT 90)
