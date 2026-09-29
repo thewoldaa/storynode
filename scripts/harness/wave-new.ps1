@@ -27,8 +27,13 @@ $ErrorActionPreference = 'Stop'
 
 . "$PSScriptRoot/lib/harness.ps1"
 
-if ($Wave -notmatch '^[0-9]+$') {
-    Write-Error "wave must be a number, got '$Wave'"
+if ($Wave -notmatch '^[0-9]+(\.[0-9]+)?$') {
+    Write-Error @"
+wave must be a number, got '$Wave'
+
+A decimal wave is allowed: 1.5 is the conventional name for work that must
+land between wave 1 and wave 2, such as splitting a shared file.
+"@
     exit 2
 }
 

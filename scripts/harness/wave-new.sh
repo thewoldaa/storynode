@@ -42,8 +42,10 @@ fi
 wave="$1"
 task="$2"
 
-if ! printf '%s' "$wave" | grep -qE '^[0-9]+$'; then
+if ! printf '%s' "$wave" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
   echo "error: wave must be a number, got '$wave'" >&2
+  echo "A decimal wave is allowed: 1.5 is the conventional name for work that" >&2
+  echo "must land between wave 1 and wave 2, such as splitting a shared file." >&2
   exit 2
 fi
 
