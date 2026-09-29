@@ -1,0 +1,72 @@
+name: forbidden-files
+
+# ---------------------------------------------------------------------------
+# Refuse a pull request that contains a file which must never be public.
+#
+# This is the gate that actually holds. The pre-commit hook gives the same
+# answer faster, but a hook can be skipped with --no-verify and can simply not
+# be installed, so it cannot be the only check.
+#
+# The job inspects the merge base rather than the head commit, so a file added
+# and then deleted within the same branch is still caught — it would otherwise
+# be invisible in the final tree while remaining in the history the merge
+# would bring in.
+# ---------------------------------------------------------------------------
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: no forbidden files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the check needs the merge base to compute the diff,
+          # and a shallow clone does not have it.
+          fetch-depth: 0
+
+      - name: Determine changed paths
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+
+          # A push to a new branch reports an all-zero "before" sha, which is
+          # not a commit. Fall back to the empty tree so every path in the
+          # branch is treated as added.
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base=$(git hash-object -t tree /dev/null)
+          fi
+
+          git diff --name-only --diff-filter=ACMR "$base" "$head" > changed.txt
+          echo "paths checked: $(wc -l < changed.txt)"
+
+      - name: Check
+        run: bash scripts/check-forbidden.sh < changed.txt
+
+      - name: Report
+        if: failure()
+        run: |
+          {
+            echo "### Forbidden files detected"
+            echo ""
+            echo "This pull request adds paths that must never enter the repository."
+            echo "See CONTRIBUTING.md, section *Forbidden files*, for the list and the reasoning."
+            echo ""
+            echo '```'
+            cat changed.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

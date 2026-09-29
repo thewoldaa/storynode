@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# Agent instruction files.
+#
+# These stay on the developer's machine and never reach the public repo. The
+# pre-commit hook and the CI job both enforce this; the entries here are the
+# first line of defence, not the only one.
+# ---------------------------------------------------------------------------
+AGENTS.md
+CLAUDE.md
+.claude/
+.agents/
+.cursor/
+.worktrees/
+agent-notes/
+scratch/
+personal/
+
+# Secrets. Nothing in this project needs a credential to build or run, so a
+# file matching these patterns is a mistake by definition.
+.env
+.env.*
+*.local
+*.key
+*.pem
+secrets/
+
+# ---------------------------------------------------------------------------
+# Build output.
+#
+# Every worktree builds into build/<task> so parallel tasks never collide on
+# object files. Ignore the whole tree rather than the individual directories.
+# ---------------------------------------------------------------------------
+build/
+out/
+CMakeUserPresets.json
+
+# ---------------------------------------------------------------------------
+# IDE and editor.
+# ---------------------------------------------------------------------------
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.swp
+
+# ---------------------------------------------------------------------------
+# Third-party downloads.
+#
+# The WebView2 SDK is fetched by scripts/fetch-deps.ps1 into third_party/. It
+# is redistributable but it is not ours, so it is not committed.
+# ---------------------------------------------------------------------------
+third_party/
+
+# ---------------------------------------------------------------------------
+# Windows shell noise.
+# ---------------------------------------------------------------------------
+Thumbs.db
+desktop.ini
+ehthumbs.db

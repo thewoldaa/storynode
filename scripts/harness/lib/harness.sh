@@ -1,0 +1,424 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# Shared functions for the wave harness.
+#
+# Sourced by every wave-*.sh script. Not executable on its own.
+#
+# The harness exists to make parallel work safe. Three rules do the work:
+#
+#   1. One task, one branch, one worktree, one build directory.
+#   2. A task declares its file territory in tasks/wave-<wave>/<task>.md, and
+#      no two tasks in the same wave may declare overlapping territory.
+#   3. A task's commits must fall inside its own declared territory.
+#
+# Rule 2 is checked before a worktree is created, because a conflict found
+# then costs nothing and a conflict found after a day of parallel work costs
+# the day. Rule 3 is checked before a push, because that is the last moment
+# the mistake is still cheap to fix.
+# ---------------------------------------------------------------------------
+
+set -euo pipefail
+
+# --- repository layout -----------------------------------------------------
+
+harness_repo_root() {
+  git rev-parse --show-toplevel
+}
+
+harness_worktree_root() {
+  echo "$(harness_repo_root)/.worktrees"
+}
+
+harness_integration_branch() {
+  echo "${STORYNODE_INTEGRATION_BRANCH:-dev}"
+}
+
+# --- naming ----------------------------------------------------------------
+#
+# A task is identified by its wave and name, and everything derived from it
+# uses the same slug so that branch, worktree, build directory and task file
+# can all be found from the slug alone.
+
+harness_slug() {
+  local wave="$1" task="$2"
+  # Lowercase and replace anything that is not alphanumeric, dot, dash or
+  # underscore. Slashes are deliberately excluded: a slash in a task name
+  # would make the build directory nested and the branch ambiguous.
+  printf '%s-%s' "$wave" "$task" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[^a-z0-9._-]/-/g'
+}
+
+harness_branch() {
+  local wave="$1" task="$2"
+  echo "wave/$(harness_slug "$wave" "$task")"
+}
+
+harness_worktree_path() {
+  local wave="$1" task="$2"
+  echo "$(harness_worktree_root)/$(harness_slug "$wave" "$task")"
+}
+
+harness_build_dir() {
+  local wave="$1" task="$2"
+  echo "build/$(harness_slug "$wave" "$task")"
+}
+
+harness_task_file() {
+  local wave="$1" task="$2"
+  echo "$(harness_repo_root)/tasks/wave-${wave}/${task}.md"
+}
+
+# Find the worktree for a task name alone, by scanning git's own worktree
+# list. Used by wave-sync/done/clean, which take only a task name because
+# requiring the wave too would mean remembering it.
+harness_worktree_for_task() {
+  local task="$1"
+  local wanted="wave-${task}"
+  local path=""
+
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *) path="${line#worktree }" ;;
+      branch\ *)
+        local branch="${line#branch refs/heads/}"
+        local slug="${branch#wave/}"
+        # Match on the slug exactly: "canvas" must not match "canvas-layers".
+        if [ "$slug" = "$wanted" ]; then
+          echo "$path"
+          return 0
+        fi
+        ;;
+    esac
+  done < <(git worktree list --porcelain)
+
+  return 1
+}
+
+# --- task declaration ------------------------------------------------------
+
+harness_require_task_file() {
+  local wave="$1" task="$2"
+  local file
+  file=$(harness_task_file "$wave" "$task")
+
+  if [ ! -f "$file" ]; then
+    echo "error: no task declaration at tasks/wave-${wave}/${task}.md" >&2
+    echo "" >&2
+    echo "Create it first. It must contain a '## Territory' section listing" >&2
+    echo "the paths this task owns, for example:" >&2
+    echo "" >&2
+    echo "    ## Territory" >&2
+    echo "" >&2
+    echo "    - src/ui/assets/canvas/**" >&2
+    echo "    - src/ui/assets/styles/canvas.css" >&2
+    echo "" >&2
+    echo "See tasks/wave-0/core.md for a worked example." >&2
+    return 1
+  fi
+}
+
+# Print the territory entries of a task file, one per line.
+#
+# Reads the lines under "## Territory" until the next "##" heading. Only lines
+# beginning with "- " are taken, and inline comments after " #" are stripped,
+# so the file stays readable.
+harness_task_territory() {
+  local file="$1"
+  awk '
+    /^##[[:space:]]+Territory[[:space:]]*$/ { in_section = 1; next }
+    /^##[[:space:]]/ { in_section = 0 }
+    in_section && /^[[:space:]]*-[[:space:]]/ {
+      sub(/^[[:space:]]*-[[:space:]]*/, "")
+      sub(/[[:space:]]+#.*$/, "")
+      gsub(/[[:space:]]+$/, "")
+      if (length($0) > 0) print
+    }
+  ' "$file"
+}
+
+# --- territory validation --------------------------------------------------
+#
+# Territories are deliberately simple. A line is one of:
+#
+#   path/to/file.ext      exactly that file
+#   path/to/dir/*         the direct children of that directory
+#   path/to/dir/**        that directory and everything under it
+#
+# Wildcards anywhere else are rejected. Supporting them would mean
+# implementing glob intersection, and the point of the check is to be
+# obviously correct rather than expressive. If a task genuinely needs a
+# pattern, it can declare the parent directory instead.
+
+harness_validate_territory_line() {
+  local line="$1"
+  if ! printf '%s' "$line" | grep -qE '^[A-Za-z0-9._/-]+(/\*\*|/\*)?$'; then
+    return 1
+  fi
+  # Reject ".." segments: a territory must not escape the repository.
+  if printf '%s' "$line" | grep -qE '(^|/)\.\.(/|$)'; then
+    return 1
+  fi
+  return 0
+}
+
+# Reduce a territory line to its comparable directory prefix.
+harness_territory_prefix() {
+  local line="$1"
+  printf '%s' "$line" | sed -E 's#/\*\*$##; s#/\*$##'
+}
+
+# Does a territory line mean "this directory and below"?
+harness_territory_recursive() {
+  local line="$1"
+  case "$line" in
+    */\*\*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Do two territory lines overlap?
+#
+# Two entries conflict when one covers the other. Because every entry reduces
+# to a directory prefix, this is a prefix test at a path boundary:
+#
+#   src/core/**          vs src/core/model.hpp   -> conflict (covered)
+#   src/core/**          vs src/coreutils/x.hpp  -> no conflict (not a
+#                                                   segment boundary)
+#   src/a/*              vs src/a/b/c.hpp        -> no conflict (* is one
+#                                                   level only)
+harness_territories_overlap() {
+  local a="$1" b="$2"
+  local pa pb
+  pa=$(harness_territory_prefix "$a")
+  pb=$(harness_territory_prefix "$b")
+
+  # Exact same prefix always conflicts.
+  if [ "$pa" = "$pb" ]; then
+    return 0
+  fi
+
+  # One is inside the other. The deeper one must be reached through a
+  # boundary, so append a separator to the shorter before comparing.
+  local shorter longer
+  if [ "${#pa}" -lt "${#pb}" ]; then shorter="$pa"; longer="$pb"; else shorter="$pb"; longer="$pa"; fi
+
+  case "$longer" in
+    "$shorter"/*)
+      # The deeper path is inside the shallower one. This only conflicts if
+      # the shallower entry is recursive, or if the deeper entry is exactly
+      # one level down (which "/*" covers).
+      if harness_territory_recursive "$a" || harness_territory_recursive "$b"; then
+        return 0
+      fi
+      local rest="${longer#"$shorter"/}"
+      if [ "${rest#*/}" = "$rest" ]; then
+        # Exactly one segment below: the direct-children case.
+        return 0
+      fi
+      return 1
+      ;;
+  esac
+
+  return 1
+}
+
+# Check every pair of territories in a wave for overlap.
+harness_check_wave_territories() {
+  local wave="$1"
+  local tasks_dir
+  tasks_dir="$(harness_repo_root)/tasks/wave-${wave}"
+
+  if [ ! -d "$tasks_dir" ]; then
+    return 0
+  fi
+
+  local -a names=()
+  local -a territories=()
+  local f name line
+
+  for f in "$tasks_dir"/*.md; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f" .md)
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      names+=("$name")
+      territories+=("$line")
+    done < <(harness_task_territory "$f")
+  done
+
+  local i j
+  for (( i=0; i<${#territories[@]}; i++ )); do
+    for (( j=i+1; j<${#territories[@]}; j++ )); do
+      # A task never conflicts with itself; the same task declaring a
+      # directory and a file inside it is redundant but harmless.
+      if [ "${names[$i]}" = "${names[$j]}" ]; then
+        continue
+      fi
+      if harness_territories_overlap "${territories[$i]}" "${territories[$j]}"; then
+        echo "error: territory conflict in wave ${wave}" >&2
+        echo "" >&2
+        echo "  tasks/wave-${wave}/${names[$i]}.md" >&2
+        echo "    declares: ${territories[$i]}" >&2
+        echo "  tasks/wave-${wave}/${names[$j]}.md" >&2
+        echo "    declares: ${territories[$j]}" >&2
+        echo "" >&2
+        echo "Two tasks in one wave must never write the same files. Move the" >&2
+        echo "shared surface into a core task in its own wave, or narrow one" >&2
+        echo "of the two territories." >&2
+        return 1
+      fi
+    done
+  done
+
+  return 0
+}
+
+# Does a repository-relative path fall inside a territory entry?
+harness_path_in_territory() {
+  local path="$1" territory="$2"
+  local prefix
+  prefix=$(harness_territory_prefix "$territory")
+
+  if [ "$path" = "$prefix" ]; then
+    return 0
+  fi
+
+  case "$path" in
+    "$prefix"/*)
+      if harness_territory_recursive "$territory"; then
+        return 0
+      fi
+      local rest="${path#"$prefix"/}"
+      if [ "${rest#*/}" = "$rest" ]; then
+        return 0
+      fi
+      return 1
+      ;;
+  esac
+
+  return 1
+}
+
+# Check that every file a task has touched falls inside its territory.
+harness_check_task_changes() {
+  local wave="$1" task="$2" worktree="$3"
+  local file
+  file=$(harness_task_file "$wave" "$task")
+
+  local -a territories=()
+  local line
+  while IFS= read -r line; do
+    [ -n "$line" ] && territories+=("$line")
+  done < <(harness_task_territory "$file")
+
+  if [ "${#territories[@]}" -eq 0 ]; then
+    echo "error: tasks/wave-${wave}/${task}.md declares no territory" >&2
+    return 1
+  fi
+
+  local integration
+  integration=$(harness_integration_branch)
+
+  # Files this branch changed relative to where it forked from dev.
+  local -a changed=()
+  local f
+  while IFS= read -r f; do
+    [ -n "$f" ] && changed+=("$f")
+  done < <(git -C "$worktree" diff --name-only "$integration"...HEAD 2>/dev/null || true)
+
+  # Uncommitted work counts too: wave-done runs before the final commit in
+  # some workflows, and a violation that is only visible after committing is
+  # a violation found too late.
+  while IFS= read -r f; do
+    [ -n "$f" ] && changed+=("$f")
+  done < <(git -C "$worktree" status --porcelain 2>/dev/null | awk '{ $1=""; sub(/^ /,""); print }')
+
+  if [ "${#changed[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  local -a outside=()
+  for f in "${changed[@]}"; do
+    # Territory is checked against committed paths only. A file that exists
+    # in the working tree but is git-ignored (a build product) is not the
+    # task's responsibility.
+    local inside=1
+    for line in "${territories[@]}"; do
+      if harness_path_in_territory "$f" "$line"; then inside=0; break; fi
+    done
+    if [ "$inside" -ne 0 ]; then
+      outside+=("$f")
+    fi
+  done
+
+  if [ "${#outside[@]}" -gt 0 ]; then
+    echo "error: task ${wave}/${task} edited files outside its territory" >&2
+    echo "" >&2
+    echo "  declared territory:" >&2
+    for line in "${territories[@]}"; do echo "    $line" >&2; done
+    echo "" >&2
+    echo "  files outside it:" >&2
+    for f in "${outside[@]}"; do echo "    $f" >&2; done
+    echo "" >&2
+    echo "Either move the change into a task that owns those files, or widen" >&2
+    echo "this task's territory in tasks/wave-${wave}/${task}.md and re-run." >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# --- build and test --------------------------------------------------------
+
+# Configure, build and test inside a worktree.
+#
+# The build directory is per-task so parallel builds never share an object
+# file or a CMake cache. Everything is done through the worktree's own copy
+# of the sources, so a build here cannot see another task's changes.
+harness_build_and_test() {
+  local worktree="$1" slug="$2"
+
+  local build_dir="$worktree/build/$slug"
+  mkdir -p "$build_dir"
+
+  echo "--- configure ($slug)"
+  cmake -S "$worktree" -B "$build_dir" \
+        -G "Visual Studio 17 2022" -A x64 \
+        -DSTORYNODE_BUILD_TESTS=ON \
+        > "$build_dir/configure.log" 2>&1 \
+    || { echo "configure failed; see $build_dir/configure.log" >&2; tail -40 "$build_dir/configure.log" >&2; return 1; }
+
+  echo "--- build ($slug)"
+  cmake --build "$build_dir" --config Debug --parallel \
+        > "$build_dir/build.log" 2>&1 \
+    || { echo "build failed; see $build_dir/build.log" >&2; tail -60 "$build_dir/build.log" >&2; return 1; }
+
+  echo "--- test ($slug)"
+  ctest --test-dir "$build_dir" -C Debug --output-on-failure \
+        > "$build_dir/test.log" 2>&1 \
+    || { echo "tests failed; see $build_dir/test.log" >&2; tail -60 "$build_dir/test.log" >&2; return 1; }
+
+  echo "--- ok"
+}
+
+# --- misc ------------------------------------------------------------------
+
+harness_require_clean_tree() {
+  local where="${1:-$(pwd)}"
+  if [ -n "$(git -C "$where" status --porcelain 2>/dev/null)" ]; then
+    echo "error: working tree at $where has uncommitted changes" >&2
+    echo "Commit or stash them before running this command." >&2
+    return 1
+  fi
+}
+
+harness_require_dev() {
+  if ! git rev-parse --verify --quiet "$(harness_integration_branch)" >/dev/null; then
+    echo "error: integration branch '$(harness_integration_branch)' does not exist" >&2
+    echo "" >&2
+    echo "Create it from main first:" >&2
+    echo "    git branch dev main" >&2
+    return 1
+  fi
+}
