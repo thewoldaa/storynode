@@ -160,6 +160,20 @@ Both produce the same symptom: the asset is in the binary, cannot be found,
 and the application shows a blank window with no error anywhere.
 `probe_resources` exists to make that visible.
 
+## What ships, and what measures it
+
+`src/ui/assets/` is for things that ship. The build globs it and inlines every
+`.js` and `.css` it finds into the page, so a file added there is in the
+application whether it was meant to be or not.
+
+A tool that measures the interface is therefore not one of those files. It
+lives under `src/tools/`, alongside `probe_resources`, and is wired into CTest
+so the number it produces stays true. A benchmark nobody runs is a benchmark
+that quietly stops being correct.
+
+That distinction came out of the `canvas` task, which needed to measure frame
+time and found it had nowhere to put the tool.
+
 ## Verification
 
 The interface is verified by having the page measure itself and report back

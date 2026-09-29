@@ -16,6 +16,20 @@ Sequential. Everything depends on it.
 | --- | --- | --- |
 | `core` | **Complete** | Build system, document model, JSON schema, project I/O, application shell, CI |
 
+## Wave 1.5 — Split the interface
+
+Sequential, one task. **Complete.** Landed before wave 1, because wave 1 could
+not start without it.
+
+| Task | Status | Deliverable |
+| --- | --- | --- |
+| `ui-split` | **Complete** | The interface split into a shell and per-area directories, so two tasks can own two parts of it |
+
+Wave 1 was planned as four parallel tasks, two of which work on the interface,
+and the interface was one file. Two tasks editing one file is the conflict the
+harness exists to prevent, so the split became its own wave rather than a
+relaxation of the rule.
+
 ## Wave 1 — Editor surface
 
 Parallel, two tasks. Both are interface areas with their own directory.
@@ -64,21 +78,19 @@ It owns `src/app/**` because it is the task that puts files on the user's disk,
 so it owns the menu, the dialogs, the window title and drag-and-drop. That
 overlap with `undo` is exactly why the two could not run together.
 
-## Wave 2 — Node types
+## Wave 1.8 — Interface measurement
 
-## Wave 1.5 — Split the interface
+Sequential, one task. Follows the canvas work, which needs a tool it has
+nowhere to put.
 
-Sequential, one task. Landed before wave 1 because wave 1 cannot start without
-it.
+| Task | Status | Territory | Deliverable |
+| --- | --- | --- | --- |
+| `measurement` | Planned | `src/tools/**`, `scripts/**`, `cmake/**` | A home for interface benchmarks, wired into CTest, with a measured baseline |
 
-| Task | Status | Deliverable |
-| --- | --- | --- |
-| `ui-split` | **Complete** | The interface split into a shell and per-area directories, so two tasks can own two parts of it |
-
-The four wave 1 tasks were planned as parallel, but two of them work on the
-interface and the interface was one file. Two tasks editing one file is the
-conflict the harness exists to prevent, so the split became its own wave rather
-than a relaxation of the rule.
+`src/ui/assets/` is for things that ship, and the build inlines every `.js` it
+finds there. A tool that measures the interface is not one of those files, and
+a benchmark that is not in the test suite stops being true. This wave settles
+both.
 
 ## Wave 2 — Node types
 
