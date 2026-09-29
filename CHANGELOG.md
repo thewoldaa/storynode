@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+**Wave 1.6 — the document session**
+
+- `DocumentSession`: one object owning the document, the undo stack and the
+  saved-state marker. The host held a `Story` and a `bool`, and a bool cannot
+  answer "is this the same as what is on disk" after an undo.
+- The saved marker is a revision number rather than a copy of the document, so
+  dirty is a comparison of two integers instead of a deep comparison of two
+  documents on every frame — and undoing back to the saved state reports clean.
+- A bounded undo stack in `src/core/history/`. A command is a value that can
+  be applied and reverted, not a closure, which is what makes an undo work
+  after a save and after another undo. Consecutive moves of one node inside a
+  short window coalesce, so a drag is one undo step and not one per message.
+- `undo` and `redo` bridge messages, and a `history` message telling the page
+  whether each is available and how deep it goes. The page does not guess:
+  after a save, after the stack is trimmed, or after the host edits on its own,
+  only the host knows.
+- `dirty` travels with the document snapshot, so the page cannot render a
+  document and a dirty flag belonging to different states.
+- Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z in the shell, and an Edit menu with Undo and
+  Redo, enabled from the same source. The binding lives in the shell because
+  undo is not a canvas or an inspector concern.
+- 31 unit tests for the stack and the session, 13 for the new bridge messages,
+  and 4 for the new layout checks.
+- The layout check now counts the interface areas that registered with the
+  shell, which is the only way to tell an area whose script threw from a
+  document with nothing in it — the markup is all in the shell, so an empty
+  graph looks the same either way.
+
 ### Fixed
 
 **Wave 1.5 — the interface split, and defects found by review**

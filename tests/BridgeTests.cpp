@@ -15,6 +15,7 @@
 
 #include "app/Bridge.h"
 #include "core/ProjectIO.h"
+#include "core/session/DocumentSession.h"
 
 using namespace storynode;
 
@@ -70,26 +71,39 @@ public:
     std::vector<std::string> messages;
 };
 
+/// A story with a start node and a dialog node, which is what every test here
+/// edits. The start node comes from MakeEmptyStory.
+Story MakeStory()
+{
+    Story story = MakeEmptyStory("Test");
+
+    Node dialog;
+    dialog.id = "dialog-1";
+    dialog.type = "dialog";
+    dialog.position = Vec2 { 400.0, 120.0 };
+    dialog.ports.push_back(Port { "in", "In", Port::Kind::Input, Port::DataType::Flow, false });
+    dialog.ports.push_back(Port { "out", "Next", Port::Kind::Output, Port::DataType::Flow, false });
+    story.nodes.push_back(std::move(dialog));
+
+    return story;
+}
+
 /// A bridge over a two-node story, with the page already ready.
 struct Fixture
 {
-    Story story;
+    /// The session the bridge edits, and the document inside it.
+    ///
+    /// Tests read `story` because that is what they assert on, and it is a
+    /// reference into the session rather than a copy: a test that asserted on
+    /// a copy would pass while the session held something else.
+    DocumentSession session;
+    Story& story;
     CapturingSender sender;
     std::unique_ptr<Bridge> bridge;
 
-    Fixture()
+    Fixture() : session(MakeStory()), story(session.Document())
     {
-        story = MakeEmptyStory("Test");
-
-        Node dialog;
-        dialog.id = "dialog-1";
-        dialog.type = "dialog";
-        dialog.position = Vec2 { 400.0, 120.0 };
-        dialog.ports.push_back(Port { "in", "In", Port::Kind::Input, Port::DataType::Flow, false });
-        dialog.ports.push_back(Port { "out", "Next", Port::Kind::Output, Port::DataType::Flow, false });
-        story.nodes.push_back(std::move(dialog));
-
-        bridge.reset(new Bridge(story, [this](const std::string& text) {
+        bridge.reset(new Bridge(session, [this](const std::string& text) {
             sender(text);
         }));
     }
@@ -564,4 +578,198 @@ TEST(AnAcceptedReplacementReportsAChange)
     CHECK(fixture.Send(R"({"type":"replaceDocument","document":{)"
                        R"("formatVersion":1,"id":"x","title":"y",)"
                        R"("nodes":[{"id":"n","type":"start","ports":[]}],"edges":[]}})"));
+}
+
+// --- undo and redo ----------------------------------------------------------
+
+TEST(BridgeUndoesAMove)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    fixture.Send(R"({"type":"moveNode","id":"dialog-1","x":900,"y":900})");
+    CHECK_EQ(fixture.story.FindNode("dialog-1")->position.x, 900.0);
+
+    CHECK(fixture.Send(R"({"type":"undo"})"));
+    CHECK_EQ(fixture.story.FindNode("dialog-1")->position.x, 400.0);
+}
+
+TEST(BridgeRedoesAMove)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    fixture.Send(R"({"type":"moveNode","id":"dialog-1","x":900,"y":900})");
+    fixture.Send(R"({"type":"undo"})");
+    CHECK(fixture.Send(R"({"type":"redo"})"));
+
+    CHECK_EQ(fixture.story.FindNode("dialog-1")->position.x, 900.0);
+}
+
+TEST(BridgeUndoingWithNothingToUndoChangesNothing)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    // A key repeat, or a second press after the stack ran out. Not an error:
+    // the page is told the depths and stops offering the command.
+    CHECK_FALSE(fixture.Send(R"({"type":"undo"})"));
+    CHECK_FALSE(fixture.Send(R"({"type":"redo"})"));
+    CHECK(fixture.sender.LastOfType("error").IsNull());
+}
+
+TEST(BridgeUndoesARemovalAndItsEdges)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    fixture.Send(R"({"type":"connect","fromNode":"start-1","fromPort":"out",)"
+                 R"("toNode":"dialog-1","toPort":"in"})");
+    fixture.Send(R"({"type":"removeNode","id":"dialog-1"})");
+    CHECK(fixture.story.FindNode("dialog-1") == nullptr);
+
+    fixture.Send(R"({"type":"undo"})");
+
+    CHECK(fixture.story.FindNode("dialog-1") != nullptr);
+    CHECK_EQ(fixture.story.edges.size(), std::size_t(1));
+    CHECK_EQ(Validate(fixture.story).size(), std::size_t(0));
+}
+
+TEST(BridgeUndoesAPropertyEdit)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    fixture.Send(R"({"type":"setProperty","id":"dialog-1","key":"speaker",)"
+                 R"("value":"Narrator"})");
+    fixture.Send(R"({"type":"undo"})");
+
+    CHECK_FALSE(fixture.story.FindNode("dialog-1")->data.Has("speaker"));
+}
+
+TEST(ANewEditAfterAnUndoRemovesTheRedo)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    fixture.Send(R"({"type":"moveNode","id":"dialog-1","x":900,"y":900})");
+    fixture.Send(R"({"type":"undo"})");
+
+    // The edit from the undone state abandons the future it was going to redo.
+    fixture.Send(R"({"type":"moveNode","id":"dialog-1","x":700,"y":700})");
+    CHECK_FALSE(fixture.Send(R"({"type":"redo"})"));
+
+    const json::Value history = fixture.sender.LastOfType("history");
+    CHECK_EQ(history["canRedo"].AsBool(), false);
+    CHECK_EQ(history["canUndo"].AsBool(), true);
+}
+
+// --- the history message ----------------------------------------------------
+//
+// The page must not guess whether undo and redo are available. After a save,
+// after the stack is trimmed, and after the host applies an edit of its own,
+// only the session knows — and a page that decided for itself would show an
+// Undo button that does nothing.
+
+TEST(BridgeSendsTheHistoryOnReady)
+{
+    Fixture fixture;
+    fixture.Send(R"({"type":"ready"})");
+
+    const json::Value history = fixture.sender.LastOfType("history");
+    CHECK_FALSE(history.IsNull());
+    CHECK_EQ(history["canUndo"].AsBool(), false);
+    CHECK_EQ(history["canRedo"].AsBool(), false);
+    CHECK_EQ(history["undoDepth"].AsInt(), std::int64_t(0));
+}
+
+TEST(BridgeReportsTheDepthsAfterAnEdit)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    fixture.Send(R"({"type":"moveNode","id":"dialog-1","x":900,"y":900})");
+
+    const json::Value history = fixture.sender.LastOfType("history");
+    CHECK_EQ(history["canUndo"].AsBool(), true);
+    CHECK_EQ(history["undoDepth"].AsInt(), std::int64_t(1));
+    CHECK_EQ(history["redoDepth"].AsInt(), std::int64_t(0));
+}
+
+TEST(BridgeReportsTheDepthsAfterAnUndo)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    fixture.Send(R"({"type":"moveNode","id":"dialog-1","x":900,"y":900})");
+    fixture.Send(R"({"type":"undo"})");
+
+    const json::Value history = fixture.sender.LastOfType("history");
+    CHECK_EQ(history["canUndo"].AsBool(), false);
+    CHECK_EQ(history["canRedo"].AsBool(), true);
+    CHECK_EQ(history["redoDepth"].AsInt(), std::int64_t(1));
+}
+
+TEST(BridgeTellsThePageTheDocumentIsDirty)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    // A freshly opened document is not dirty, and the page is told so rather
+    // than inferring it from having sent a message.
+    CHECK_EQ(fixture.sender.LastOfType("document")["dirty"].AsBool(), false);
+
+    fixture.Send(R"({"type":"moveNode","id":"dialog-1","x":900,"y":900})");
+    CHECK_EQ(fixture.sender.LastOfType("document")["dirty"].AsBool(), true);
+
+    fixture.Send(R"({"type":"undo"})");
+    CHECK_EQ(fixture.sender.LastOfType("document")["dirty"].AsBool(), false);
+}
+
+TEST(BridgeDiscardsTheHistoryOnReplacement)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    fixture.Send(R"({"type":"moveNode","id":"dialog-1","x":900,"y":900})");
+    fixture.Send(R"({"type":"replaceDocument","document":{)"
+                 R"("formatVersion":1,"id":"x","title":"y",)"
+                 R"("nodes":[{"id":"n","type":"start","ports":[]}],"edges":[]}})");
+
+    // The old steps name nodes the new document does not have. An undo from
+    // here must not be available.
+    CHECK_FALSE(fixture.Send(R"({"type":"undo"})"));
+    CHECK_EQ(fixture.sender.LastOfType("history")["canUndo"].AsBool(), false);
+    CHECK_EQ(fixture.story.nodes.size(), std::size_t(1));
+}
+
+// --- edits that change nothing ----------------------------------------------
+
+TEST(ARefusedMoveDoesNotReportAChange)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    // The page sends a move when a drag ends. A click that did not move the
+    // node arrives here too, and it is not an edit: reporting one would mark
+    // the document dirty for a drag that did nothing.
+    CHECK_FALSE(fixture.Send(R"({"type":"moveNode","id":"dialog-1","x":400,"y":120})"));
+    CHECK_EQ(fixture.sender.LastOfType("document")["dirty"].AsBool(), false);
+    CHECK_EQ(fixture.sender.LastOfType("history")["canUndo"].AsBool(), false);
+}
+
+TEST(ASetPropertyToTheSameValueDoesNotReportAChange)
+{
+    Fixture fixture;
+    fixture.MakeReady();
+
+    // The inspector sends the field on blur. Focusing a field and leaving it
+    // without typing is not an edit, and an undo step for it would appear to
+    // do nothing when the user pressed Ctrl+Z.
+    fixture.Send(R"({"type":"setProperty","id":"dialog-1","key":"speaker",)"
+                 R"("value":"Narrator"})");
+    CHECK_FALSE(fixture.Send(R"({"type":"setProperty","id":"dialog-1","key":"speaker",)"
+                             R"("value":"Narrator"})"));
+
+    CHECK_EQ(fixture.sender.LastOfType("history")["undoDepth"].AsInt(), std::int64_t(1));
 }

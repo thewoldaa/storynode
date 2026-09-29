@@ -104,6 +104,27 @@ button:hover { border-color: var(--faint); }
 button:active { background: var(--rule); }
 button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
+/* A button the host says is unavailable. Dimmed and not clickable, rather
+   than removed: a control that appears and disappears moves the ones beside
+   it, and the user aims at where a button was. */
+button:disabled {
+  color: var(--faint);
+  background: var(--panel);
+  border-color: var(--rule);
+  cursor: default;
+}
+
+button:disabled:hover { border-color: var(--rule); }
+
+/* A rule between groups in the toolbar. The undo pair is about the document's
+   past; the rest is about its content. */
+.toolbar .sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--rule);
+}
+
 /* --- the graph container --------------------------------------------------
 
    The container is here because the shell owns it. What goes inside is the

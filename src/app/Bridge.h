@@ -10,6 +10,11 @@
 // not the transport: the host calls HandleMessage with text that arrived from
 // the web view, and the bridge calls back with text to send. That separation
 // is what lets the bridge be tested without a window, which the tests do.
+//
+// The bridge works on a DocumentSession rather than a bare Story, so that
+// every mutating message goes through the undo stack. A message that edited
+// the document directly would be an edit the user cannot take back, which is
+// the one thing an editor must not do.
 // ---------------------------------------------------------------------------
 
 #pragma once
@@ -19,6 +24,7 @@
 #include <vector>
 
 #include "core/Model.h"
+#include "core/session/DocumentSession.h"
 
 namespace storynode {
 
@@ -34,7 +40,7 @@ struct BridgeReply
 
 /// Dispatches messages between the page and the document.
 ///
-/// The host owns the document and the sender function; the bridge owns the
+/// The host owns the session and the sender function; the bridge owns the
 /// protocol. Adding a message type is a change here and in the page's script,
 /// and never a change to the host's window or WebView2 code.
 class Bridge
@@ -44,10 +50,10 @@ public:
     /// that knows how to talk to the web view.
     using Sender = std::function<void(const std::string&)>;
 
-    /// The bridge reads and writes this document directly. It is the host's
-    /// document, not a copy, so a change here is visible to the rest of the
-    /// application.
-    Bridge(Story& document, Sender sender);
+    /// The bridge reads and writes this session's document directly. It is the
+    /// host's session, not a copy, so a change here is visible to the rest of
+    /// the application — including the undo stack and the saved-state marker.
+    Bridge(DocumentSession& session, Sender sender);
 
     /// Handle one message from the page.
     ///
@@ -66,6 +72,20 @@ public:
 
     /// Send the current validation results.
     void SendValidation();
+
+    /// Send whether undo and redo are available, and how deep each is.
+    ///
+    /// The page must not guess: after a save, after the stack is trimmed, and
+    /// after the host applies an edit of its own, only the session knows. A
+    /// page that decided for itself would show an enabled Undo button that
+    /// does nothing.
+    void SendHistory();
+
+    /// Send the document, the problems and the history state.
+    ///
+    /// The three always travel together after a change, so a caller that
+    /// forgets one cannot leave the page showing a state the host is not in.
+    void SendAll();
 
     /// Send a message of the given type with a message field.
     void SendError(const std::string& message);
@@ -107,6 +127,12 @@ private:
     /// Remove an edge.
     void HandleDisconnect(const json::Value& message);
 
+    /// Take the last edit back.
+    void HandleUndo();
+
+    /// Re-apply the last undone edit.
+    void HandleRedo();
+
     /// Ask for the document to be sent again.
     void HandleRequestDocument();
 
@@ -117,7 +143,7 @@ private:
     /// point of mutation, where the fact is unambiguous.
     bool Dispatch(const std::string& type, const json::Value& message);
 
-    Story& _document;
+    DocumentSession& _session;
     Sender _sender;
     bool _pageReady = false;
     bool _changed = false;
