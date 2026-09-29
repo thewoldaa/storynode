@@ -14,7 +14,7 @@ Sequential. Everything depends on it.
 
 | Task | Status | Deliverable |
 | --- | --- | --- |
-| `core` | In progress | Build system, document model, JSON schema, project I/O, application shell, CI |
+| `core` | **Complete** | Build system, document model, JSON schema, project I/O, application shell, CI |
 
 ## Wave 1 — Editor surface
 
